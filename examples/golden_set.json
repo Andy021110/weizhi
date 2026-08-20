@@ -1,0 +1,1322 @@
+{
+  "t1_vocab": {
+    "label": "词汇",
+    "samples": [
+      {
+        "source_url": "plan:22:14:GTM:1787136190",
+        "title": "GTM",
+        "summary": null,
+        "body": null,
+        "core_points": [],
+        "think_question": "GTM 在商业和技术语境中的含义有何不同？如何根据上下文判断？",
+        "open_question": null,
+        "quiz": [
+          {
+            "question": "在商业会议中，老板说“We need a solid GTM for the new product.”，这里的 GTM 最可能指什么？",
+            "options": [
+              "谷歌标签管理器",
+              "市场进入策略",
+              "通用测试方法",
+              "全球贸易管理"
+            ],
+            "answer": 1,
+            "explanation": "在商业语境中，GTM 通常指 Go-To-Market 策略，即如何将产品推向市场。"
+          },
+          {
+            "question": "技术人员说“We use GTM to deploy our analytics tags.”，这里的 GTM 指什么？",
+            "options": [
+              "市场进入策略",
+              "谷歌标签管理器",
+              "通用测试机",
+              "全球团队管理"
+            ],
+            "answer": 1,
+            "explanation": "在技术语境中，GTM 常指 Google Tag Manager，用于管理网站标签。"
+          }
+        ],
+        "difficulty": null,
+        "source": "vocab",
+        "category": "词汇",
+        "template": "t1_vocab",
+        "generated_at": "2026-08-19T18:43:10.303792",
+        "date": "2026-08-19",
+        "plan_id": 22,
+        "plan_index": 14,
+        "plan_total": 20,
+        "memory_state": null,
+        "next_review_at": null,
+        "review_count": 0,
+        "ease": 2.5,
+        "interval_days": 0,
+        "favorite": 0,
+        "group_index": 2,
+        "batch_index": 1,
+        "word": "GTM",
+        "phonetic": "/ˌdʒiː tiː ˈem/",
+        "pos": "abbr.",
+        "pos_label": "缩写",
+        "definition_cn": "进入市场策略（Go-To-Market）：把产品推向目标客户的全套打法，含定价、渠道、销售与营销。",
+        "etymology": "首字母缩写，来自短语 Go-To-Market 或 Google Tag Manager。",
+        "examples": [
+          {
+            "en": "We need to finalize our GTM strategy before the product launch.",
+            "cn": "在产品发布前，我们需要敲定市场进入策略。"
+          },
+          {
+            "en": "Use GTM to manage all your tracking tags without editing the website code.",
+            "cn": "使用谷歌跟踪代码管理器，无需修改网站代码即可管理所有跟踪标签。"
+          },
+          {
+            "en": "The startup hired a consultant to help with their GTM plan.",
+            "cn": "这家初创公司聘请了一位顾问来帮助他们制定市场进入计划。"
+          }
+        ],
+        "common_mistake": "中文母语者常把 GTM 直接理解为“谷歌标签管理器”，但在商业语境中它更常指“市场进入策略”，需根据上下文区分。",
+        "review_quiz": [
+          {
+            "question": "GTM 在商业语境中的全称是什么？",
+            "options": [
+              "Google Tag Manager",
+              "Go-To-Market",
+              "General Test Method",
+              "Global Trade Management"
+            ],
+            "answer": 1,
+            "explanation": "商业中 GTM 是 Go-To-Market 的缩写，指市场进入策略。"
+          },
+          {
+            "question": "GTM 在技术语境中常指什么？",
+            "options": [
+              "市场进入策略",
+              "谷歌标签管理器",
+              "通用测试方法",
+              "全球贸易管理"
+            ],
+            "answer": 1,
+            "explanation": "技术领域 GTM 常指 Google Tag Manager。"
+          },
+          {
+            "question": "“We need to define our GTM.” 最可能出现在什么场景？",
+            "options": [
+              "产品发布会议",
+              "代码调试",
+              "财务审计",
+              "员工培训"
+            ],
+            "answer": 0,
+            "explanation": "GTM 策略常用于产品发布前的市场规划。"
+          }
+        ],
+        "think_answer": "GTM 是一个多义缩写，最常见的是 Go-To-Market（市场进入策略）和 Google Tag Manager（谷歌跟踪代码管理器）。在商业语境中，如讨论产品发布、市场规划、销售策略时，GTM 指 Go-To-Market，强调如何将产品或服务推向目标市场。例如：“Our GTM includes pricing and distribution channels.”（我们的市场进入策略包括定价和分销渠道。）在技术语境中，如讨论网站分析、标签管理时，GTM 指 Google Tag Manager，是一种工具。例如：“Install GTM to track user behavior.”（安装谷歌跟踪代码管理器以追踪用户行为。）判断方法：看上下文中的动词和名词。如果与策略、计划、市场相关，多为 Go-To-Market；如果与代码、标签、网站相关，多为 Google Tag Manager。中文母语者常因不熟悉缩写而混淆，建议根据语境灵活理解。",
+        "_date": "2026-08-19"
+      },
+      {
+        "source_url": "plan:22:2:inference:1787136107",
+        "title": "inference",
+        "summary": null,
+        "body": null,
+        "core_points": [],
+        "think_question": "inference 和 implication 有什么区别？",
+        "open_question": null,
+        "quiz": [
+          {
+            "question": "你看到地上有湿脚印，推断刚才有人走过。用哪个词？",
+            "options": [
+              "inference",
+              "implication",
+              "reference",
+              "preference"
+            ],
+            "answer": 0,
+            "explanation": "inference 指基于证据的推断；implication 是暗示；reference 是参考；preference 是偏好。"
+          },
+          {
+            "question": "科学家从实验数据中得出什么？",
+            "options": [
+              "inference",
+              "influence",
+              "incidence",
+              "indifference"
+            ],
+            "answer": 0,
+            "explanation": "inference 是结论/推断；influence 影响；incidence 发生率；indifference 冷漠。"
+          }
+        ],
+        "difficulty": null,
+        "source": "vocab",
+        "category": "词汇",
+        "template": "t1_vocab",
+        "generated_at": "2026-08-19T18:41:47.340311",
+        "date": "2026-08-19",
+        "plan_id": 22,
+        "plan_index": 2,
+        "plan_total": 20,
+        "memory_state": "learning",
+        "next_review_at": "2026-08-21",
+        "review_count": 0,
+        "ease": 2.5,
+        "interval_days": 1,
+        "favorite": 0,
+        "group_index": 1,
+        "batch_index": 1,
+        "word": "inference",
+        "phonetic": "/ˈɪnfərəns/",
+        "pos": "n.",
+        "pos_label": "名词",
+        "definition_cn": "推理：模型训练完成后，用它对新输入做预测/生成的过程。",
+        "etymology": "来自拉丁语 inferre（带入、推论），由 in-（进入）+ ferre（带来）构成，后缀 -ence 表性质。",
+        "examples": [
+          {
+            "en": "The detective's inference was based on the footprints at the scene.",
+            "cn": "侦探的推断是基于现场的脚印。"
+          },
+          {
+            "en": "It's a reasonable inference that she was tired because she yawned all day.",
+            "cn": "她整天打哈欠，因此推断她累了是合理的。"
+          },
+          {
+            "en": "We can draw an inference from the data that sales will increase next quarter.",
+            "cn": "我们可以从数据中推断出下季度销售额将增长。"
+          }
+        ],
+        "common_mistake": "中文母语者常把 inference 与 implication 混淆，前者是“推断”的过程/结果，后者是“暗示”的含义。",
+        "review_quiz": [
+          {
+            "question": "inference 的中文意思是？",
+            "options": [
+              "推断",
+              "暗示",
+              "参考",
+              "偏好"
+            ],
+            "answer": 0,
+            "explanation": "inference 意为推断或结论。"
+          },
+          {
+            "question": "“基于证据的推断”用英语怎么说？",
+            "options": [
+              "evidence-based inference",
+              "evidence-based implication",
+              "evidence-based reference",
+              "evidence-based preference"
+            ],
+            "answer": 0,
+            "explanation": "inference 是推断，implication 是暗示，reference 是参考，preference 是偏好。"
+          },
+          {
+            "question": "“draw an inference” 的意思是？",
+            "options": [
+              "得出结论",
+              "画一幅画",
+              "拉一把椅子",
+              "吸引注意力"
+            ],
+            "answer": 0,
+            "explanation": "draw an inference 是固定搭配，意为“推断出”。"
+          }
+        ],
+        "think_answer": "inference 和 implication 都涉及“未明说”的信息，但方向相反。inference 是“推断”，指从证据或前提中得出结论，是听者/观察者的主动行为。例如：\"From the dark clouds, the inference was that it would rain.\"（从乌云推断要下雨。）implication 是“暗示”，指说话者或事件本身隐含的意义，是信息传递中的被动含义。例如：\"She said she was busy, but the implication was that she didn't want to see me.\"（她说忙，但暗示是不想见我。）简单说：inference 是从A推出B，implication 是A中藏着B。中文母语者常混淆，因为两者都可译作“推断/暗示”，但注意主语不同：inference 由人做出，implication 由话语或行为带有。",
+        "_date": "2026-08-19"
+      }
+    ]
+  },
+  "t2_reading": {
+    "label": "精读",
+    "samples": [
+      {
+        "source_url": "plan:27:4:ReAct 的提示词模板与实现要点:1787156341",
+        "title": "ReAct 提示词模板与实现要点：让 AI 边想边做",
+        "summary": "ReAct 通过交替推理与行动，提升 LLM 复杂任务表现，模板与实现细节是关键。",
+        "body": "在大型语言模型（LLM）的应用中，如何让模型更可靠地完成复杂任务（如多步推理、信息检索、决策制定）一直是核心挑战。传统的提示方法要么只让模型“思考”（如 Chain-of-Thought），要么只让模型“行动”（如直接调用工具），但两者割裂，导致模型在长链条任务中容易迷失或产生幻觉。ReAct（Reasoning + Acting）范式应运而生，它通过让模型在推理和行动之间交替进行，从而显著提升任务完成的准确性和可解释性。\n\nReAct 的核心思想是：在提示词中明确要求模型输出“Thought”（思考）、“Action”（行动）和“Observation”（观察）三个部分。Thought 是模型对当前状态的推理，Action 是模型决定采取的具体步骤（如调用某个工具或搜索），Observation 是执行 Action 后得到的结果。通过这种循环，模型能够根据外部反馈不断调整自己的推理路径，最终得出答案。这种“边想边做”的模式，不仅提高了任务的完成度，还让模型的决策过程变得透明，便于调试和信任。\n\n实现 ReAct 的关键要点包括：\n\n1. **格式要求**：提示词必须严格规定输出格式，例如使用“Thought: ...\\nAction: ...\\nObservation: ...\\n”的模板。模型需要遵循这种结构化输出，以便后续解析和循环。\n2. **少样本示例**：在提示词中提供几个完整的 ReAct 示例（包括 Thought/Action/Observation 的完整流程），让模型模仿这种模式。示例应覆盖不同场景，帮助模型理解何时需要行动、何时需要停止。\n3. **停止条件**：明确告诉模型何时停止循环。通常，当模型认为已经获得足够信息并可以给出最终答案时，应输出“Final Answer: ...”。否则，模型可能会无限循环或过度行动。\n\n此外，实现 ReAct 还需要注意：Action 的选择要受限（如只允许调用预定义的函数），Observation 要真实反映环境反馈，以及处理解析错误和异常情况。这些细节直接影响到 ReAct 的稳定性和实用性。\n\n结论：ReAct 是一种强大的提示工程技术，它通过结合推理和行动，让 LLM 能够更智能地处理复杂任务。掌握其模板和实现要点，是构建可靠 AI 应用的重要一步。对于开发者而言，理解 ReAct 的机制，并灵活应用到具体场景，将能显著提升 AI 系统的性能。",
+        "core_points": [
+          "ReAct 交替推理与行动，提升复杂任务表现",
+          "严格格式、少样本示例、停止条件是关键",
+          "ReAct 增强可解释性，便于调试和信任"
+        ],
+        "think_question": "ReAct 与 Chain-of-Thought 的本质区别是什么？",
+        "open_question": {
+          "question": "请简述 ReAct 提示词的三个关键实现要点，并说明每个要点的重要性。",
+          "reference_answer": "ReAct 提示词的三个关键实现要点是：1）严格的格式要求，确保模型输出结构化的 Thought/Action/Observation，便于解析和循环；2）少样本示例，提供完整流程供模型模仿，帮助理解何时推理、何时行动；3）明确的停止条件，如输出 Final Answer 来终止循环，避免无限行动。这些要点保证了 ReAct 的稳定性和可执行性。",
+          "grading_points": [
+            "格式要求：结构化输出",
+            "少样本示例：模仿模式",
+            "停止条件：终止循环"
+          ]
+        },
+        "quiz": [
+          {
+            "question": "ReAct 提示词中，模型输出“Action”后，下一步应是什么？",
+            "options": [
+              "Thought",
+              "Observation",
+              "Final Answer",
+              "Action"
+            ],
+            "answer": 1,
+            "explanation": "Action 执行后得到 Observation，这是 ReAct 循环的关键反馈环节。"
+          },
+          {
+            "question": "为什么 ReAct 需要少样本示例？",
+            "options": [
+              "为了增加提示词长度",
+              "让模型模仿推理-行动交替模式",
+              "为了减少计算成本",
+              "为了限制模型输出格式"
+            ],
+            "answer": 1,
+            "explanation": "少样本示例提供完整流程，帮助模型理解何时思考、何时行动、何时停止。"
+          },
+          {
+            "question": "在 ReAct 中，停止条件通常是什么？",
+            "options": [
+              "模型输出一定数量的 Thought",
+              "模型输出“Final Answer”",
+              "模型连续输出两个 Action",
+              "模型无法生成 Observation"
+            ],
+            "answer": 1,
+            "explanation": "当模型认为信息足够时，输出 Final Answer 来终止循环。"
+          }
+        ],
+        "difficulty": "入门",
+        "source": "学习计划",
+        "category": "精读",
+        "template": "t2_reading",
+        "generated_at": "2026-08-20T00:19:01.057757",
+        "date": "2026-08-20",
+        "plan_id": 27,
+        "plan_index": 4,
+        "plan_total": 5,
+        "memory_state": "learning",
+        "next_review_at": "2026-08-21",
+        "review_count": 0,
+        "ease": 2.5,
+        "interval_days": 1,
+        "favorite": 0,
+        "group_index": 1,
+        "batch_index": 1,
+        "think_answer": "ReAct 与 Chain-of-Thought（CoT）的本质区别在于是否引入外部交互。CoT 仅让模型在内部进行推理，输出连续的思考步骤，但没有外部反馈，因此可能产生幻觉或无法验证推理过程。而 ReAct 在推理中穿插行动，行动会调用外部工具（如搜索、数据库）并获取观察结果，这些观察作为新信息进入推理链，使模型能够根据真实反馈调整方向。例如，在回答“2024年奥运会主办城市”时，CoT 可能直接推理出“巴黎”，但若模型知识过时，可能出错；ReAct 则先行动（搜索“2024奥运会主办城市”），观察结果后给出正确答案。因此，ReAct 更适合需要实时信息或外部验证的任务。",
+        "review_quiz": [
+          {
+            "question": "ReAct 的完整循环顺序是 Thought → Action → Observation。",
+            "options": [
+              "正确",
+              "错误"
+            ],
+            "answer": 0,
+            "explanation": "ReAct 循环确实是 Thought → Action → Observation，然后循环或输出最终答案。"
+          },
+          {
+            "question": "ReAct 提示词中，Action 部分可以任意调用任何工具。",
+            "options": [
+              "正确",
+              "错误"
+            ],
+            "answer": 1,
+            "explanation": "Action 通常被限制为预定义的函数或工具，以保证安全性。"
+          },
+          {
+            "question": "ReAct 比 Chain-of-Thought 更擅长需要外部信息的任务。",
+            "options": [
+              "正确",
+              "错误"
+            ],
+            "answer": 0,
+            "explanation": "ReAct 能通过行动获取外部信息，因此更擅长此类任务。"
+          }
+        ],
+        "_date": "2026-08-20"
+      },
+      {
+        "source_url": "plan:27:3:动作空间与工具调用：LLM 如何与环境交互:1787156327",
+        "title": "动作空间与工具调用：LLM 如何与环境交互",
+        "summary": "LLM通过动作空间与工具调用扩展能力，实现与环境动态交互。",
+        "body": "大型语言模型（LLM）最初只能生成文本，但现实世界的任务往往需要与环境交互，比如查询实时信息、执行精确计算或操作外部系统。这种交互能力的关键在于“动作空间”和“工具调用”。\n\n动作空间是模型在特定环境中所有可能采取的动作集合。对于LLM，动作可以是输出一段文本、调用一个API、执行一段代码，或发起一次搜索。定义清晰的动作空间，是让模型知道“能做什么”的基础。工具调用则是动作空间的具体实例化——模型通过调用外部工具（如搜索引擎、计算器、数据库），将自身的语言能力转化为实际问题的解决能力。\n\n一个典型的流程是：模型接收用户请求，在动作空间中选择合适的工具，生成调用指令（如“搜索：2024年诺贝尔物理学奖得主”），然后解析工具返回的结果，再决定下一步动作或生成最终回复。这一过程通常由“代理”（agent）框架协调，模型作为“大脑”，工具作为“手脚”。\n\n关键在于模型如何选择动作。这依赖于模型对任务的理解、上下文信息，以及训练中习得的工具使用策略。例如，面对“计算圆周率小数点后100位”的任务，模型应选择调用计算工具而非直接生成文本，因为后者容易出错。解析结果同样重要：工具返回的数据可能是结构化或非结构化的，模型需要提取关键信息，并判断是否满足用户需求。\n\n工具调用还涉及错误处理与反馈循环。若工具调用失败，模型需根据错误信息调整动作，比如更换工具或修改参数。这种“行动-观察-再行动”的循环，让LLM从被动文本生成器，转变为主动的问题解决者。\n\n然而，动作空间的设计也带来挑战。过大的动作空间会增加选择难度，可能导致模型“不知所措”；过小的动作空间则限制能力。此外，工具调用的可靠性、安全性（如防止恶意调用）也是重要议题。\n\n总之，动作空间与工具调用是LLM从“会说话”到“会做事”的桥梁。理解这一机制，有助于我们设计更智能的AI系统，也让我们看到LLM在自动化、人机协作中的巨大潜力。",
+        "core_points": [
+          "动作空间定义了LLM可采取的所有动作，是交互基础。",
+          "工具调用将语言能力转化为实际问题解决能力。",
+          "模型通过选择动作、解析结果、反馈循环与环境交互。"
+        ],
+        "think_question": "如何平衡动作空间的广度与模型选择的准确性？",
+        "open_question": {
+          "question": "请举一个实际场景，说明LLM如何通过工具调用与环境交互，并描述动作选择和结果解析过程。",
+          "reference_answer": "场景：用户询问“明天北京天气”。LLM动作空间包含搜索工具。模型选择调用天气API，生成调用指令（如getWeather(北京, 明天)）。解析返回的JSON数据，提取温度、天气状况等信息，生成自然语言回复：“明天北京晴，气温20-28℃。”若API返回错误，模型可能调整参数或改用其他天气源。",
+          "grading_points": [
+            "明确场景和工具选择",
+            "描述动作选择逻辑",
+            "说明结果解析与反馈"
+          ]
+        },
+        "quiz": [
+          {
+            "question": "LLM调用工具时，解析结果的主要目的是什么？",
+            "options": [
+              "直接输出原始数据",
+              "提取关键信息并判断是否满足需求",
+              "将工具结果转为文本",
+              "忽略错误结果"
+            ],
+            "answer": 1,
+            "explanation": "解析结果是为了提取关键信息并判断是否满足用户需求，而非直接输出或简单转换。"
+          },
+          {
+            "question": "以下哪项最能体现动作空间的设计价值？",
+            "options": [
+              "让模型能生成更多文本",
+              "明确模型可采取的动作范围",
+              "限制模型的能力",
+              "提高模型训练速度"
+            ],
+            "answer": 1,
+            "explanation": "动作空间定义了模型所有可能动作，是交互的基础，体现设计价值在于明确范围。"
+          },
+          {
+            "question": "当工具调用失败时，LLM的合理做法是？",
+            "options": [
+              "直接放弃任务",
+              "重复相同调用",
+              "根据错误信息调整动作",
+              "忽略错误继续生成"
+            ],
+            "answer": 2,
+            "explanation": "模型应利用反馈循环，根据错误信息调整动作，如更换工具或修改参数。"
+          }
+        ],
+        "difficulty": "入门",
+        "source": "学习计划",
+        "category": "精读",
+        "template": "t2_reading",
+        "generated_at": "2026-08-20T00:18:47.776310",
+        "date": "2026-08-20",
+        "plan_id": 27,
+        "plan_index": 3,
+        "plan_total": 5,
+        "memory_state": "learning",
+        "next_review_at": "2026-08-21",
+        "review_count": 0,
+        "ease": 2.5,
+        "interval_days": 1,
+        "favorite": 0,
+        "group_index": 1,
+        "batch_index": 1,
+        "think_answer": "平衡动作空间广度与选择准确性，需要从设计和使用两个层面入手。设计上，可以分层组织动作空间，将常用工具放在顶层，细粒度工具折叠在子菜单中，减少模型搜索范围。同时，利用元数据（如工具描述、参数类型）帮助模型理解每个工具的用途，提高选择准确率。使用上，可引入“路由”机制，先让模型判断任务类型，再进入对应子空间。例如，数学问题先路由到计算器子空间，新闻查询路由到搜索子空间。具体例子：AutoGPT采用动态动作空间，根据任务进度逐步暴露相关工具，既保持灵活性，又避免信息过载。总之，通过结构化和动态调整，可以兼顾广度与准确性。",
+        "review_quiz": [
+          {
+            "question": "动作空间是LLM在环境中所有可能动作的集合。",
+            "options": [
+              "正确",
+              "错误"
+            ],
+            "answer": 0,
+            "explanation": "原文定义动作空间为所有可能动作的集合。"
+          },
+          {
+            "question": "工具调用是动作空间的具体实例化。",
+            "options": [
+              "正确",
+              "错误"
+            ],
+            "answer": 0,
+            "explanation": "工具调用通过具体工具实现动作，是动作空间的实例。"
+          },
+          {
+            "question": "LLM直接生成文本就能解决所有问题，无需工具调用。",
+            "options": [
+              "正确",
+              "错误"
+            ],
+            "answer": 1,
+            "explanation": "许多任务需要实时信息或精确计算，必须借助工具。"
+          }
+        ],
+        "_date": "2026-08-20"
+      }
+    ]
+  },
+  "t3_math": {
+    "label": "数学",
+    "samples": [
+      {
+        "source_url": "plan:28:2:从特征分解到奇异值分解:1787156383",
+        "title": "从特征分解到奇异值分解：让任意矩阵都能“分解”",
+        "summary": null,
+        "body": null,
+        "core_points": [],
+        "think_question": "如果矩阵是方阵且对称，SVD和特征分解会有什么关系？",
+        "open_question": {
+          "question": "用自己的话解释SVD的直观含义，并说明它为什么比特征分解更通用。",
+          "reference_answer": "SVD将任意矩阵分解为三个部分：U（左奇异向量）、Σ（奇异值）、V^T（右奇异向量）。直观上，它把矩阵的变换分解为旋转、缩放和旋转。它比特征分解更通用，因为特征分解只适用于方阵，而SVD适用于任何形状的矩阵。SVD在数据降维、压缩、推荐系统等领域有广泛应用。",
+          "grading_points": [
+            "提到U、Σ、V^T三个部分（5字）",
+            "说明SVD适用于任意矩阵（5字）",
+            "提到旋转缩放旋转的直观（5字）"
+          ]
+        },
+        "quiz": [
+          {
+            "question": "SVD能处理什么形状的矩阵？",
+            "options": [
+              "只能方阵",
+              "任意矩阵",
+              "只能长方形",
+              "只能对称矩阵"
+            ],
+            "answer": 1,
+            "explanation": "SVD适用于任意m×n矩阵，这是它比特征分解更通用的原因。"
+          },
+          {
+            "question": "SVD中Σ矩阵的对角线元素代表什么？",
+            "options": [
+              "特征值",
+              "奇异值",
+              "旋转角度",
+              "缩放比例"
+            ],
+            "answer": 1,
+            "explanation": "Σ对角线上的非负实数称为奇异值，表示矩阵在对应方向上的“强度”或缩放。"
+          },
+          {
+            "question": "如果SVD中只有一个非零奇异值，说明矩阵的秩是多少？",
+            "options": [
+              "0",
+              "1",
+              "2",
+              "无法确定"
+            ],
+            "answer": 1,
+            "explanation": "非零奇异值的个数等于矩阵的秩，所以只有1个非零时秩为1。"
+          }
+        ],
+        "difficulty": null,
+        "source": "math",
+        "category": "数学",
+        "template": "t3_math",
+        "generated_at": "2026-08-20T00:19:43.031008",
+        "date": "2026-08-20",
+        "plan_id": 28,
+        "plan_index": 2,
+        "plan_total": 5,
+        "memory_state": "learning",
+        "next_review_at": "2026-08-21",
+        "review_count": 0,
+        "ease": 2.5,
+        "interval_days": 1,
+        "favorite": 0,
+        "group_index": 1,
+        "batch_index": 1,
+        "intuition": "想象你有一张混乱的照片，想把它拆成几个简单的部分。特征分解只能处理“方方正正”的矩阵，就像只能拆开正方形的拼图。但现实中的矩阵大多是长方形的，比如一张照片的像素矩阵。SVD就像一把万能钥匙，能把任何形状的矩阵都拆成三个部分：一个旋转（U）、一个缩放（Σ）、再一个旋转（V^T）。这样，即使矩阵不是方阵，我们也能看清它的“骨架”，找到最重要的方向。",
+        "example": "假设有一个2×3的矩阵，表示3个点在2维空间的位置。SVD会告诉你：先旋转这些点（U），然后沿坐标轴拉伸（Σ），最后再旋转（V^T）。比如，如果Σ中只有一个非零值，说明这些点其实都落在一条直线上，数据是“低维”的。你可以想象，这就像把一堆散落的点，通过旋转和缩放，找到它们最主要的伸展方向。",
+        "try_it": "想象一个3×2矩阵，它的SVD中Σ有两个非零值，这意味着数据在二维空间里是“满秩”的。试着想想，如果其中一个值变成0，数据会变成什么样？",
+        "review_quiz": [
+          {
+            "question": "特征分解要求矩阵必须是______。",
+            "options": [
+              "任意矩阵",
+              "方阵且可对角化",
+              "对称矩阵",
+              "正交矩阵"
+            ],
+            "answer": 1,
+            "explanation": "特征分解要求矩阵是方阵且可对角化，而SVD没有这个限制。"
+          },
+          {
+            "question": "SVD分解的形式是______。",
+            "options": [
+              "A = UΣV^T",
+              "A = UΣV",
+              "A = QΛQ^T",
+              "A = LDL^T"
+            ],
+            "answer": 0,
+            "explanation": "标准SVD形式为A = UΣV^T，其中U和V是正交矩阵，Σ是对角矩阵。"
+          },
+          {
+            "question": "SVD中的U和V矩阵有什么性质？",
+            "options": [
+              "都是方阵",
+              "都是正交矩阵",
+              "都是对角矩阵",
+              "都是对称矩阵"
+            ],
+            "answer": 1,
+            "explanation": "U和V是正交矩阵，满足U^T U = I，V^T V = I。"
+          }
+        ],
+        "think_answer": "对于实对称矩阵，特征分解和SVD有紧密联系。实对称矩阵A可以分解为A = QΛQ^T，其中Q是正交矩阵，Λ是对角矩阵（特征值）。而SVD分解为A = UΣV^T。由于A对称，有A = A^T，可以证明U和V可以取相同的正交矩阵（即U=V=Q），且Σ的对角线元素是特征值的绝对值（如果特征值非负，则Σ=Λ）。例如，矩阵[[2,0],[0,3]]是对称的，其特征值和奇异值都是2和3，U=V=I。如果特征值有负，比如[[-1,0],[0,2]]，特征值为-1和2，但奇异值为1和2，此时U和V会包含符号调整。所以，对称矩阵的SVD可以看作特征分解的推广，但奇异值总是非负的。",
+        "_date": "2026-08-20"
+      },
+      {
+        "source_url": "plan:24:2:KL散度:1787136330",
+        "title": "KL散度：两个分布之间的“距离”",
+        "summary": null,
+        "body": null,
+        "core_points": [],
+        "think_question": "在变分自编码器（VAE）中，我们最小化KL(Q(z)||P(z))，这里的Q和P分别代表什么？换个场景，比如用KL散度来比较两个文本主题分布，它还是合适的度量吗？",
+        "open_question": {
+          "question": "请用自己的话解释KL散度的含义，并说明它为什么不是对称的。",
+          "reference_answer": "KL散度衡量的是当我们用一个分布Q去逼近真实分布P时，平均需要额外多少比特的信息。它定义为每个事件上P和Q的对数比值的期望，其中权重是P的概率。由于这个期望是按P加权的，而反过来按Q加权，所以不对称。例如，P在某个事件上概率很大而Q很小，KL(P||Q)会很大；但反过来可能不大。因此，KL散度不是对称的。",
+          "grading_points": [
+            "解释KL散度作为额外比特或信息损失的含义",
+            "指出KL散度不对称的原因（加权不同）",
+            "给出一个具体例子说明不对称性"
+          ]
+        },
+        "quiz": [
+          {
+            "question": "如果两个分布完全相同，KL散度是多少？",
+            "options": [
+              "0",
+              "1",
+              "无穷大",
+              "负数"
+            ],
+            "answer": 0,
+            "explanation": "当P=Q时，每个项log(P/Q)=log(1)=0，所以总和为0。"
+          },
+          {
+            "question": "KL散度是否满足对称性？即KL(P||Q)是否等于KL(Q||P)？",
+            "options": [
+              "总是相等",
+              "通常不相等",
+              "只对正态分布相等",
+              "只有P和Q独立时相等"
+            ],
+            "answer": 1,
+            "explanation": "KL散度不对称，因为公式中P和Q的位置不能互换，一般KL(P||Q)≠KL(Q||P)。"
+          },
+          {
+            "question": "在机器学习中，我们常最小化KL(真实分布||模型分布)，这等价于什么？",
+            "options": [
+              "最大化似然",
+              "最小化交叉熵",
+              "最大化熵",
+              "最小化方差"
+            ],
+            "answer": 1,
+            "explanation": "最小化KL(P||Q)等价于最小化交叉熵H(P,Q)，因为H(P)是常数。"
+          }
+        ],
+        "difficulty": null,
+        "source": "math",
+        "category": "数学",
+        "template": "t3_math",
+        "generated_at": "2026-08-19T18:45:30.799510",
+        "date": "2026-08-19",
+        "plan_id": 24,
+        "plan_index": 2,
+        "plan_total": 5,
+        "memory_state": null,
+        "next_review_at": null,
+        "review_count": 0,
+        "ease": 2.5,
+        "interval_days": 0,
+        "favorite": 0,
+        "group_index": 1,
+        "batch_index": 1,
+        "intuition": "想象你在猜一枚硬币的翻转结果，我告诉你它正面朝上的概率是0.5，但实际概率是0.7。KL散度就是衡量“如果你用错误的概率来编码信息，平均会多花多少比特”。它就像两个概率分布之间的“信息距离”，但和普通距离不同，它是不对称的——从A到B的KL散度不一定等于从B到A的。比如，用真实分布编码数据是最省比特的，任何其他分布都会导致额外的开销，KL散度就是这种额外开销的平均值。",
+        "example": "假设有两个分布P和Q，P是公平硬币（正面概率0.5），Q是偏向正面的硬币（正面概率0.7）。如果真实分布是P，但你用Q来编码，那么平均每个结果你会多花一些比特。具体计算：对于正面，真实概率0.5，编码概率0.7，多花log2(0.5/0.7)≈-0.485比特（实际上是节省？不，因为log小于0，所以是负的？但平均下来是正的）。实际上，KL(P||Q) = 0.5*log2(0.5/0.7) + 0.5*log2(0.5/0.3) ≈ 0.5*(-0.485) + 0.5*(0.737) = 0.126比特。所以平均每个结果多花约0.126比特。反过来，KL(Q||P)会不同，约为0.184比特，体现了不对称性。",
+        "try_it": "试着计算当P和Q完全相同时，KL散度是多少？",
+        "review_quiz": [
+          {
+            "question": "KL散度总是非负的吗？",
+            "options": [
+              "是",
+              "否",
+              "取决于分布",
+              "只有离散分布时是"
+            ],
+            "answer": 0,
+            "explanation": "根据吉布斯不等式，KL散度恒大于等于0，当且仅当P=Q时取0。"
+          },
+          {
+            "question": "KL散度与交叉熵的关系是？",
+            "options": [
+              "KL(P||Q) = H(P,Q) - H(P)",
+              "KL(P||Q) = H(P) - H(P,Q)",
+              "KL(P||Q) = H(P,Q) + H(P)",
+              "KL(P||Q) = H(P) * H(P,Q)"
+            ],
+            "answer": 0,
+            "explanation": "交叉熵H(P,Q)=H(P)+KL(P||Q)，所以KL(P||Q)=H(P,Q)-H(P)。"
+          },
+          {
+            "question": "KL散度可以用于度量两个分布之间的距离，但它不是真正的距离，因为？",
+            "options": [
+              "它不满足三角不等式",
+              "它可能为负",
+              "它不对称",
+              "它不满足非负性"
+            ],
+            "answer": 2,
+            "explanation": "距离度量需要对称性，而KL散度不对称，所以不是真正的距离。"
+          }
+        ],
+        "think_answer": "在VAE中，Q(z)是编码器输出的近似后验分布，P(z)是先验分布（通常是标准正态）。最小化KL(Q||P)迫使编码器输出的分布接近先验，从而保证潜在空间的连续性。换个场景，比如比较两个文本主题分布，KL散度仍然可用，但要注意它不对称：KL(文档A的主题分布||文档B的主题分布)与反过来不同。如果你需要对称度量，可以使用JS散度（对称化）或Wasserstein距离。例如，两个文档的主题分布如果差异很大，KL散度会很大；但如果一个分布有零概率而另一个没有，KL可能变成无穷大，这时需要平滑处理。",
+        "_date": "2026-08-19"
+      }
+    ]
+  },
+  "t4_trivia": {
+    "label": "通识",
+    "samples": [
+      {
+        "source_url": "custom:1787136473:AI 芯片之争 GPU vs TPU",
+        "title": "AI芯片之争：GPU vs TPU，谁才是算力之王？",
+        "summary": null,
+        "body": "当我们谈论AI时，总绕不开算力。而算力的核心，就是芯片。目前，AI芯片领域最耀眼的两个名字，一个是英伟达的GPU，另一个是谷歌的TPU。GPU原本是给游戏渲染画面的，但它的并行计算能力恰好适合AI训练。TPU则是谷歌专门为AI定制的芯片，从2015年推出至今，已迭代到第四代。\n\n为什么GPU能跨界成为AI主力？因为AI训练本质上是大量矩阵运算，而GPU拥有数千个计算核心，能同时处理海量数据，比CPU快得多。但GPU也有短板：它并非为AI设计，功耗高，且通用性导致部分资源浪费。\n\nTPU则完全不同。它采用脉动阵列架构，专为矩阵乘法和卷积运算优化，计算效率极高。谷歌在TPU上运行TensorFlow框架，软硬协同，性能惊人。TPU的另一个优势是低精度计算，比如bfloat16，在保证精度的同时大幅提升速度。\n\n但TPU并非完美。它只支持谷歌的生态，对开发者不友好，且无法像GPU那样灵活处理各种任务。而GPU凭借CUDA生态和英伟达的持续优化，依然是AI开发者的首选。\n\n这场芯片之争，本质上是通用与专用、生态与性能的博弈。GPU像瑞士军刀，什么都能干；TPU像专业手术刀，专精一术。未来，随着AI应用多样化，两者可能会共存，甚至融合。但无论谁胜出，受益的都是AI技术的进步。",
+        "core_points": [],
+        "think_question": "GPU和TPU之争，对普通人选择学习AI有什么启发？",
+        "open_question": null,
+        "quiz": [
+          {
+            "question": "TPU与GPU相比，最大的优势是什么？",
+            "options": [
+              "通用性强",
+              "专为AI运算优化",
+              "功耗更低",
+              "价格便宜"
+            ],
+            "answer": 1,
+            "explanation": "TPU采用脉动阵列架构，专为矩阵乘法等AI运算设计，效率远超通用GPU。"
+          },
+          {
+            "question": "GPU最初是为什么用途设计的？",
+            "options": [
+              "科学计算",
+              "AI训练",
+              "游戏图形渲染",
+              "视频编码"
+            ],
+            "answer": 2,
+            "explanation": "GPU（图形处理器）最初是为了加速游戏和图形渲染，其并行计算能力后来被用于AI。"
+          }
+        ],
+        "difficulty": null,
+        "source": "trivia",
+        "category": "通识",
+        "template": "t4_trivia",
+        "generated_at": "2026-08-19T18:47:53.646466",
+        "date": "2026-08-19",
+        "plan_id": null,
+        "plan_index": null,
+        "plan_total": null,
+        "memory_state": null,
+        "next_review_at": null,
+        "review_count": 0,
+        "ease": 2.5,
+        "interval_days": 0,
+        "favorite": 0,
+        "group_index": null,
+        "batch_index": null,
+        "hook": "你知道吗？训练ChatGPT的芯片，可能不是你想的那个GPU，而是谷歌的秘密武器TPU。",
+        "fun_facts": [
+          "TPU是谷歌为AI定制的芯片，2015年首次公布。",
+          "GPU最初是用于游戏图形渲染，后来才被用于AI。",
+          "TPU采用脉动阵列架构，专攻矩阵运算。"
+        ],
+        "share_line": "下次聊AI，你可以说：GPU是瑞士军刀，TPU是手术刀，但训练大模型，谷歌偷偷用了TPU！",
+        "review_quiz": [
+          {
+            "question": "TPU是哪家公司推出的AI专用芯片？",
+            "options": [
+              "英伟达",
+              "英特尔",
+              "谷歌",
+              "AMD"
+            ],
+            "answer": 2,
+            "explanation": "TPU（张量处理单元）是谷歌在2015年推出的AI专用芯片。"
+          },
+          {
+            "question": "GPU在AI训练中的主要优势是什么？",
+            "options": [
+              "低功耗",
+              "并行计算能力强",
+              "支持TensorFlow",
+              "价格低廉"
+            ],
+            "answer": 1,
+            "explanation": "GPU拥有数千个核心，擅长并行计算，适合AI训练中的矩阵运算。"
+          },
+          {
+            "question": "TPU采用的架构类型是什么？",
+            "options": [
+              "冯·诺依曼架构",
+              "脉动阵列架构",
+              "哈佛架构",
+              "数据流架构"
+            ],
+            "answer": 1,
+            "explanation": "TPU采用脉动阵列架构，专门优化矩阵乘法和卷积运算。"
+          }
+        ],
+        "think_answer": "这个现象启发我们：在技术领域，没有万能的工具，只有最适合特定场景的方案。对于AI学习者，不必纠结于选择GPU还是TPU，而应理解它们的设计思想和适用场景。例如，如果你想快速上手AI开发，英伟达的GPU搭配CUDA生态是首选，因为资料多、社区大；如果你在谷歌云上工作，TPU可能更高效。但更重要的是，掌握AI核心原理，比如矩阵运算、神经网络，这样无论芯片怎么变，你都能适应。具体例子：很多初学者用Google Colab的免费GPU学习，但真正训练大模型时，谷歌会建议用TPU。所以，理解底层逻辑比追逐硬件更重要。",
+        "_date": "2026-08-19"
+      },
+      {
+        "source_url": "custom:1787136431:图灵测试",
+        "title": "图灵测试：机器能思考吗？一场持续70年的哲学辩论",
+        "summary": null,
+        "body": "1950年，计算机科学之父艾伦·图灵在论文《计算机器与智能》中提出了一个著名问题：“机器能思考吗？”但他很快意识到，“思考”这个词过于模糊，容易引发无休止的争论。于是，他设计了一个更可操作的实验：模仿游戏。\n\n这个游戏原本是一个社交游戏：一个人（A）和一台机器（B）被隔开，另一个人（C）通过文本对话，试图判断哪个是人、哪个是机器。如果机器成功让C误判的次数超过30%，那么这台机器就通过了测试。图灵认为，如果机器能在对话中表现得像人，那么我们就应该承认它“能思考”。\n\n图灵测试的核心思想是：智能不是内在的、不可观察的，而是通过行为表现出来的。这被称为“行为主义”的智能观。它绕过了“意识”和“主观体验”这些难题，把问题简化为“能否通过语言行为骗过人类”。\n\n然而，这个测试也引发了巨大争议。哲学家约翰·塞尔提出了“中文房间”思想实验：一个不懂中文的人，通过规则手册，能完美地回答中文问题，但他依然不理解中文。同样，机器可能只是在模拟对话，而没有真正的理解。\n\n今天，图灵测试已成为AI领域的里程碑，每年都有“勒布纳奖”比赛，试图让聊天机器人通过测试。虽然目前还没有机器能完全通过，但像GPT系列这样的模型已经让很多人感到“像人”。\n\n图灵测试的意义不仅在于测试机器，更在于迫使我们思考：什么是智能？什么是意识？我们如何判断另一个存在是否具有心智？这些问题至今没有定论，而图灵测试作为起点，开启了这场持续70年的哲学辩论。",
+        "core_points": [],
+        "think_question": "图灵测试对今天的AI发展有什么启示？",
+        "open_question": null,
+        "quiz": [
+          {
+            "question": "图灵测试的核心判断标准是什么？",
+            "options": [
+              "机器能否通过对话骗过人类裁判",
+              "机器能否正确回答所有问题",
+              "机器能否拥有自我意识",
+              "机器能否通过物理测试"
+            ],
+            "answer": 0,
+            "explanation": "图灵测试以对话行为为判断依据，如果机器能让裁判误判比例超过30%，即通过。"
+          },
+          {
+            "question": "“中文房间”思想实验主要质疑了什么？",
+            "options": [
+              "机器能否真正理解语言",
+              "机器能否拥有情感",
+              "机器能否通过图灵测试",
+              "机器能否自我学习"
+            ],
+            "answer": 0,
+            "explanation": "中文房间认为，即使机器能完美模拟对话，也不代表它真正理解内容，质疑了行为主义智能观。"
+          }
+        ],
+        "difficulty": null,
+        "source": "trivia",
+        "category": "通识",
+        "template": "t4_trivia",
+        "generated_at": "2026-08-19T18:47:11.506968",
+        "date": "2026-08-19",
+        "plan_id": null,
+        "plan_index": null,
+        "plan_total": null,
+        "memory_state": null,
+        "next_review_at": null,
+        "review_count": 0,
+        "ease": 2.5,
+        "interval_days": 0,
+        "favorite": 0,
+        "group_index": null,
+        "batch_index": null,
+        "hook": "你知道吗：当AI在对话中骗过30%的人类裁判，它就被认为通过了图灵测试——但这是否意味着机器真的会思考？",
+        "fun_facts": [
+          "图灵测试最初叫“模仿游戏”，灵感来自一个社交游戏。",
+          "勒布纳奖每年举办，奖金2000美元，至今无人全胜。",
+          "2014年，聊天程序“尤金·古斯特曼”曾宣称通过测试，但争议很大。"
+        ],
+        "share_line": "图灵测试：你以为你在和AI聊天，其实AI也在思考你。",
+        "review_quiz": [
+          {
+            "question": "图灵测试由谁在何时提出？",
+            "options": [
+              "艾伦·图灵，1950年",
+              "约翰·塞尔，1980年",
+              "诺伯特·维纳，1948年",
+              "马文·明斯基，1961年"
+            ],
+            "answer": 0,
+            "explanation": "图灵在1950年论文《计算机器与智能》中提出图灵测试。"
+          },
+          {
+            "question": "图灵测试的通过标准是裁判误判率超过多少？",
+            "options": [
+              "10%",
+              "20%",
+              "30%",
+              "50%"
+            ],
+            "answer": 2,
+            "explanation": "图灵原论文中提出，如果裁判误判概率超过30%，则机器通过测试。"
+          },
+          {
+            "question": "以下哪个奖项与图灵测试直接相关？",
+            "options": [
+              "诺贝尔奖",
+              "图灵奖",
+              "勒布纳奖",
+              "普利策奖"
+            ],
+            "answer": 2,
+            "explanation": "勒布纳奖是专门奖励通过图灵测试的聊天程序的奖项。"
+          }
+        ],
+        "think_answer": "图灵测试提醒我们，AI的智能评价不应只看内在机制，而应看其外在表现。今天，许多AI系统（如聊天机器人、语音助手）都在模仿人类对话，但它们的“智能”可能只是模式匹配。\n\n启示是：我们不应被AI的“像人”迷惑，而应关注其实际能力与局限。例如，GPT能写出流畅文章，但它并不理解内容，只是基于统计规律生成文本。\n\n另一个启示是：图灵测试鼓励我们设计更自然的人机交互。但真正的智能可能不仅仅是“骗过人类”，而是具备理解、推理和创造能力。未来，我们需要更全面的评估方法，超越图灵测试。",
+        "_date": "2026-08-19"
+      }
+    ]
+  },
+  "t5_skill": {
+    "label": "技能",
+    "samples": [
+      {
+        "source_url": "plan:25:1:AI 产品 PRD 撰写:1787136377",
+        "title": "5分钟学会AI产品PRD的5大独特结构",
+        "summary": "掌握用户故事、数据、模型、评测、边界，写出可落地的AI PRD。",
+        "body": null,
+        "core_points": [],
+        "think_question": "如果模型效果不达标，但业务急需上线，你如何调整PRD？",
+        "open_question": {
+          "question": "设计一个AI辅助写作功能的PRD，写出其用户故事、数据需求、模型需求、评测标准、边界异常各一条。",
+          "reference_answer": "用户故事：作为自媒体编辑，我希望AI根据主题生成文章大纲，以便快速搭建框架。数据需求：10万篇优质文章标题和正文，格式为JSON，含主题、大纲、正文。模型需求：使用GPT-4，输入主题（<50字），输出大纲（3-5个要点），延迟<3秒。评测标准：离线ROUGE-L≥0.3，在线用户采纳率≥30%。边界异常：输入主题为空时返回提示；模型无响应时回退到模板大纲。",
+          "grading_points": [
+            "用户故事含角色、功能、价值",
+            "评测标准量化且含离线在线",
+            "边界异常有具体兜底方案"
+          ]
+        },
+        "quiz": [
+          {
+            "question": "AI产品PRD的正确结构顺序是？",
+            "options": [
+              "用户故事→数据需求→模型需求→评测标准→边界异常",
+              "数据需求→用户故事→模型需求→边界异常→评测标准",
+              "用户故事→模型需求→数据需求→评测标准→边界异常",
+              "模型需求→数据需求→用户故事→边界异常→评测标准"
+            ],
+            "answer": 0,
+            "explanation": "标准顺序是用户故事驱动，再数据、模型、评测，最后边界异常。"
+          },
+          {
+            "question": "评测标准中，离线指标和在线指标可以只选其一？",
+            "options": [
+              "正确",
+              "错误"
+            ],
+            "answer": 1,
+            "explanation": "离线指标保证模型质量，在线指标验证业务价值，两者缺一不可。"
+          }
+        ],
+        "difficulty": null,
+        "source": "skill",
+        "category": "技能",
+        "template": "t5_skill",
+        "generated_at": "2026-08-19T18:46:17.101816",
+        "date": "2026-08-19",
+        "plan_id": 25,
+        "plan_index": 1,
+        "plan_total": 5,
+        "memory_state": "learning",
+        "next_review_at": "2026-08-21",
+        "review_count": 0,
+        "ease": 2.5,
+        "interval_days": 1,
+        "favorite": 0,
+        "group_index": 1,
+        "batch_index": 1,
+        "steps": [
+          {
+            "step": "1. 用用户故事描述场景",
+            "detail": "以“作为[角色]，我希望[功能]，以便[价值]”格式写用户故事，覆盖正常和异常路径。示例：作为电商运营，我希望AI自动生成商品标题，以便节省人工编辑时间。"
+          },
+          {
+            "step": "2. 明确数据需求",
+            "detail": "列出训练和推理所需数据：数据来源、格式、量级、标注规范、隐私合规。示例：训练数据需10万条商品描述+人工标题对，格式为CSV，字段：商品ID、描述、标题。"
+          },
+          {
+            "step": "3. 定义模型需求",
+            "detail": "说明模型类型（如LLM、分类模型）、输入输出格式、性能指标（准确率、延迟、吞吐量）。示例：采用GPT-4，输入商品描述（<500字），输出标题（<30字），要求首字延迟<2秒。"
+          },
+          {
+            "step": "4. 制定评测标准",
+            "detail": "设定离线评测（BLEU、ROUGE）和在线评测（点击率、转化率），并定义通过阈值。示例：离线ROUGE-L≥0.4，在线点击率提升≥5%才可上线。"
+          },
+          {
+            "step": "5. 列出边界与异常处理",
+            "detail": "明确输入限制、模型失效场景、兜底策略。示例：输入超500字截断；模型返回空时，回退到人工模板标题。"
+          }
+        ],
+        "bad_example": "只写功能需求，未定义数据、评测和异常，导致开发后无法验收。",
+        "good_example": "按五要素完整描述，每个环节有明确验收指标，开发测试有据可依。",
+        "tip": "评测标准尽量量化，并与业务指标挂钩，让模型效果可感知。",
+        "try_it": "选一个你手头的AI功能，用五要素重写该功能的PRD段落。",
+        "review_quiz": [
+          {
+            "question": "AI PRD中，用户故事必须包含角色、功能、价值三要素？",
+            "options": [
+              "正确",
+              "错误"
+            ],
+            "answer": 0,
+            "explanation": "标准用户故事格式即包含这三要素。"
+          },
+          {
+            "question": "数据需求中只需说明数据量，无需说明隐私合规？",
+            "options": [
+              "正确",
+              "错误"
+            ],
+            "answer": 1,
+            "explanation": "隐私合规是数据需求的重要部分，必须明确。"
+          },
+          {
+            "question": "边界与异常处理是AI PRD的可选部分？",
+            "options": [
+              "正确",
+              "错误"
+            ],
+            "answer": 1,
+            "explanation": "AI模型存在不确定性，边界与异常处理是必备部分。"
+          }
+        ],
+        "think_answer": "首先，明确不达标的指标是离线还是在线。若离线不达标，可调整模型需求（如换更大模型、增加训练数据）并重新评估；若在线不达标，则需分析业务场景，可能调整评测标准（如降低阈值但增加人工抽检），或增加兜底策略（如人工审核）。但不应直接降低标准，而应权衡风险：例如，若产品是低风险（如商品标题生成），可灰度上线并监控；若高风险（如医疗诊断），则必须严格达标。具体例子：某AI客服机器人意图识别准确率只有85%，但业务急需，可先上线并设置人工转接兜底，同时迭代模型，并在PRD中更新评测标准和上线条件。",
+        "_date": "2026-08-19"
+      },
+      {
+        "source_url": "plan:25:5:评测体系设计:1787136419",
+        "title": "5 分钟学会设计 AI 产品评测体系",
+        "summary": "四步搭建评测体系：选指标、建数据集、跑流程、迭代优化。",
+        "body": null,
+        "core_points": [],
+        "think_question": "如果产品是推荐系统，评测指标如何设计？",
+        "open_question": {
+          "question": "为一个智能写作助手的“语法纠错”功能设计评测体系，简述指标、数据集和流程。",
+          "reference_answer": "指标：准确率、召回率、F1、用户满意度。数据集：收集1000句含语法错误的句子，标注正确版本，另加100句无错误句子测试误报。流程：用测试集运行模型，计算指标，邀请10名用户试用并打分，最后分析错误案例迭代。",
+          "grading_points": [
+            "指标包含准确率和召回率",
+            "数据集含正负样本",
+            "流程含用户满意度评测"
+          ]
+        },
+        "quiz": [
+          {
+            "question": "设计评测体系时，正确的步骤顺序是？",
+            "options": [
+              "A. 选指标→建数据集→跑流程→迭代",
+              "B. 建数据集→选指标→迭代→跑流程",
+              "C. 跑流程→选指标→建数据集→迭代",
+              "D. 迭代→建数据集→跑流程→选指标"
+            ],
+            "answer": 0,
+            "explanation": "先明确目标选指标，再构建数据，执行评测，最后迭代优化。"
+          },
+          {
+            "question": "评测指标中，用户满意度属于哪类指标？",
+            "options": [
+              "A. 技术指标",
+              "B. 体验指标",
+              "C. 成本指标",
+              "D. 效率指标"
+            ],
+            "answer": 1,
+            "explanation": "用户满意度反映主观体验，属于体验指标。"
+          }
+        ],
+        "difficulty": null,
+        "source": "skill",
+        "category": "技能",
+        "template": "t5_skill",
+        "generated_at": "2026-08-19T18:46:59.543806",
+        "date": "2026-08-19",
+        "plan_id": 25,
+        "plan_index": 5,
+        "plan_total": 5,
+        "memory_state": "learning",
+        "next_review_at": "2026-08-21",
+        "review_count": 0,
+        "ease": 2.5,
+        "interval_days": 1,
+        "favorite": 0,
+        "group_index": 1,
+        "batch_index": 1,
+        "steps": [
+          {
+            "step": "明确评测目标与指标",
+            "detail": "根据产品类型选择指标。例如：分类任务用准确率、召回率、F1；生成任务用BLEU、ROUGE；同时加入用户满意度（如问卷净推荐值NPS）。示例：一个客服机器人，目标减少转人工，指标选意图识别准确率≥90%，用户满意度≥4.5分。"
+          },
+          {
+            "step": "构建高质量评测数据集",
+            "detail": "收集真实用户数据，覆盖典型场景和边界情况。示例：从日志中随机抽取1000条用户问题，人工标注意图，另加100条刁钻问题（如网络用语、错别字）。确保数据分布与真实使用一致。"
+          },
+          {
+            "step": "制定评测流程并执行",
+            "detail": "固定评测环境，批量运行模型，记录指标。示例：用脚本输入测试集，输出预测结果，计算准确率等。同时做用户满意度测试，让20名用户试用并打分。"
+          },
+          {
+            "step": "分析结果并迭代优化",
+            "detail": "对比指标与目标，分析失败案例，调整模型或指标。示例：若准确率达标但满意度低，检查回复是否生硬，改进话术，重新评测。"
+          }
+        ],
+        "bad_example": "只用一个准确率指标，且数据集只有100条简单样本，忽略边界情况。",
+        "good_example": "结合准确率、召回率和用户满意度，数据集包含1000条多样本和100条刁钻样本。",
+        "tip": "用A/B测试对比新旧版本，每次只改一个变量，确保指标变化可归因。",
+        "try_it": "今天就为你的一个AI功能列出3个核心指标，并收集10条真实输入作为测试集。",
+        "review_quiz": [
+          {
+            "question": "评测数据集只需包含典型样本，无需边界情况。",
+            "options": [
+              "A. 正确",
+              "B. 错误"
+            ],
+            "answer": 1,
+            "explanation": "边界情况能暴露模型弱点，必须包含。"
+          },
+          {
+            "question": "评测流程应固定环境，确保结果可复现。",
+            "options": [
+              "A. 正确",
+              "B. 错误"
+            ],
+            "answer": 0,
+            "explanation": "固定环境避免变量干扰，保证评测一致。"
+          },
+          {
+            "question": "迭代优化时，可以同时修改多个变量。",
+            "options": [
+              "A. 正确",
+              "B. 错误"
+            ],
+            "answer": 1,
+            "explanation": "一次只改一个变量，才能准确判断影响。"
+          }
+        ],
+        "think_answer": "推荐系统评测需多维度：离线指标如准确率、召回率、覆盖率，在线指标如点击率、转化率、用户留存。还要考虑新颖性和多样性。例如，一个视频推荐系统，用准确率衡量推荐相关性，用召回率看用户喜欢视频被推荐的比例，同时监测用户平均观看时长。若准确率高但时长短，可能推荐过于单一，需要平衡。具体例子：某电商推荐，点击率提升但购买率下降，需检查是否推荐了低价低质商品，调整指标权重。",
+        "_date": "2026-08-19"
+      }
+    ]
+  },
+  "t6_code": {
+    "label": "代码",
+    "samples": [
+      {
+        "source_url": "plan:33:27:SARSA算法:1787159611",
+        "title": "SARSA：在策略TD学习，跟着实际行动走",
+        "summary": "基于当前策略的实际动作更新Q值，在策略时序差分学习。",
+        "body": null,
+        "core_points": [],
+        "think_question": "SARSA 在什么场景下可能不适用？",
+        "open_question": {
+          "question": "请用自己的话解释 SARSA 算法是如何工作的，包括它如何更新 Q 值。",
+          "reference_answer": "SARSA 是一种时序差分强化学习算法，它学习状态-动作对的价值。在每个时间步，智能体根据当前策略（如 ε-贪心）选择动作，执行后得到奖励和下一状态，然后在下一状态再次根据策略选择动作。更新时，使用当前 Q 值加上学习率乘以（奖励加折扣后的下一个 Q 值减去当前 Q 值）来更新。因为下一个动作是实际执行的，所以它是 on-policy 算法。",
+          "grading_points": [
+            "提到 on-policy 和实际选择动作",
+            "正确描述更新公式",
+            "提到 ε-贪心策略"
+          ]
+        },
+        "quiz": [
+          {
+            "question": "SARSA 更新 Q(s,a) 时，目标值使用哪个值？",
+            "options": [
+              "Q(s', a')，其中 a' 是执行的动作",
+              "max_a' Q(s', a')",
+              "r + γ * max_a' Q(s',a')",
+              "r + γ * Q(s',a')"
+            ],
+            "answer": 3,
+            "explanation": "SARSA 使用实际选择的动作 a' 的 Q 值，即 r + γQ(s',a')。"
+          },
+          {
+            "question": "SARSA 属于哪种学习方式？",
+            "options": [
+              "离线策略（off-policy）",
+              "在策略（on-policy）",
+              "无模型（model-free）",
+              "基于模型（model-based）"
+            ],
+            "answer": 1,
+            "explanation": "SARSA 使用当前策略产生的动作来更新，属于在策略学习。"
+          },
+          {
+            "question": "在悬崖行走问题中，SARSA 相比 Q-learning 通常表现如何？",
+            "options": [
+              "更冒险，奖励更高",
+              "更保守，避免掉悬崖",
+              "两者相同",
+              "SARSA 无法学习"
+            ],
+            "answer": 1,
+            "explanation": "SARSA 考虑探索的随机性，因此会学得更保守，避免危险。"
+          }
+        ],
+        "difficulty": null,
+        "source": "code",
+        "category": "计划",
+        "template": "t6_code",
+        "generated_at": "2026-08-20T01:13:31.131657",
+        "date": "2026-08-20",
+        "plan_id": 33,
+        "plan_index": 27,
+        "plan_total": 100,
+        "memory_state": null,
+        "next_review_at": null,
+        "review_count": 0,
+        "ease": 2.5,
+        "interval_days": 0,
+        "favorite": 0,
+        "group_index": 6,
+        "batch_index": 1,
+        "intuition": "想象你在一个迷宫里找宝藏，每一步你都会根据当前策略（比如随机或贪心）选择一个动作走。SARSA就像你在走的过程中，每走一步就回头看看：刚才这一步走得好不好？评价的标准不是看下一步最优的动作，而是看你实际会怎么走。因为你可能偶尔会探索（随机走），所以评价会反映你真实的走法。这样学到的策略会更保守，因为它在学习时就把探索考虑进去了。",
+        "pseudocode": "初始化 Q(s,a) 任意值\n对于每一幕（episode）：\n    初始化状态 s\n    根据策略（如 ε-贪心）从 Q 选择动作 a\n    循环直到 s 是终止状态：\n        执行动作 a，观察奖励 r 和下一个状态 s'\n        根据策略（如 ε-贪心）从 Q 选择下一个动作 a'（注意：这里实际选择）\n        更新 Q(s,a) <- Q(s,a) + α * [r + γ * Q(s',a') - Q(s,a)]\n        s <- s'; a <- a'  # 移动到下一个状态和动作",
+        "key_steps": [
+          "在当前状态 s 根据策略选择动作 a（例如 ε-贪心）",
+          "执行动作 a，得到奖励 r 和下一个状态 s'",
+          "在 s' 根据当前策略选择下一个动作 a'（实际会执行的动作）",
+          "用 Q(s',a') 作为目标值更新 Q(s,a)",
+          "移动到 s' 和 a'，继续循环"
+        ],
+        "why": "SARSA 是 on-policy 算法，它使用当前策略产生的实际动作来更新，因此学到的是当前策略下的动作价值。相比 Q-learning 的 off-policy 更新（使用最大 Q 值），SARSA 在探索时会把随机动作的负面影响考虑进去，因此更保守，在危险环境中更安全。它解决了策略评估与改进一致性的问题，避免高估。",
+        "example": "假设一个网格世界，状态 s 有两个动作：向上（安全）和向下（有陷阱）。当前策略是 ε-贪心，ε=0.1。在状态 s 时，策略选择了向下（因为探索）。执行后得到奖励 -10，到达状态 s'。在 s' 处策略选择动作 a'（可能又是随机）。SARSA 更新 Q(s,向下) 时，目标使用 Q(s',a')，而不是 max Q(s',·)。这样 Q(s,向下) 会降低，因为目标值包含了可能的随机性。",
+        "pitfalls": "容易忘记 a' 必须根据当前策略（包含探索）选择，而不是直接取最大 Q 值，否则就变成 Q-learning 了。",
+        "review_quiz": [
+          {
+            "question": "SARSA 中的 'S' 代表什么？",
+            "options": [
+              "状态（State）",
+              "随机（Stochastic）",
+              "安全（Safe）",
+              "采样（Sample）"
+            ],
+            "answer": 0,
+            "explanation": "SARSA 是 State-Action-Reward-State-Action 的缩写。"
+          },
+          {
+            "question": "SARSA 更新公式中的 α 是什么？",
+            "options": [
+              "折扣因子",
+              "学习率",
+              "探索率",
+              "奖励"
+            ],
+            "answer": 1,
+            "explanation": "α 是学习率，控制更新步长。"
+          },
+          {
+            "question": "SARSA 名称中最后一个 'A' 指的是什么？",
+            "options": [
+              "当前动作",
+              "下一个动作",
+              "最优动作",
+              "随机动作"
+            ],
+            "answer": 1,
+            "explanation": "SARSA 表示序列：状态-动作-奖励-状态-动作，最后一个 A 是下一个动作。"
+          }
+        ],
+        "think_answer": "SARSA 是 on-policy 算法，它学习的策略深受当前探索策略（如 ε-贪心）的影响。如果探索率 ε 很高，SARSA 会学到非常保守的策略，甚至可能无法找到最优路径。在需要最优策略的场景（如围棋、自动驾驶的规划），我们通常希望 off-policy 方法如 Q-learning 或 DQN，它们可以学习最优策略而不管探索。另外，SARSA 需要每一步都根据当前策略选择动作，因此不适合离线数据（offline data）训练，因为离线数据来自不同策略，无法保证 on-policy 假设。例如，在医疗推荐中，历史数据可能来自不同医生，SARSA 无法直接使用。",
+        "_date": "2026-08-20"
+      },
+      {
+        "source_url": "plan:33:55:多Agent协作:1787159996",
+        "title": "多Agent协作：像公司团队一样分工的LLM对话网络",
+        "summary": "多个LLM Agent通过消息传递协作，像公司团队一样分工解决复杂任务。",
+        "body": null,
+        "core_points": [],
+        "think_question": "多Agent协作在什么场景下不适用？",
+        "open_question": {
+          "question": "请用自己的话描述多Agent协作的工作流程。",
+          "reference_answer": "多Agent协作模拟团队工作：首先定义多个Agent，每个有特定角色和系统提示词；然后创建对话组，由调度器管理。用户下达任务后，调度器选择合适Agent发言，该Agent生成回复并广播给所有Agent；其他Agent根据回复决定是否响应。调度器继续选择下一个发言者，循环直到任务完成或达到最大轮次。最终汇总对话结果。关键点是角色分工、消息广播和调度决策。",
+          "grading_points": [
+            "提到角色分工（系统提示词）",
+            "提到调度器管理发言顺序",
+            "提到消息广播和循环终止"
+          ]
+        },
+        "quiz": [
+          {
+            "question": "多Agent协作中，Agent之间如何通信？",
+            "options": [
+              "通过共享数据库",
+              "通过消息传递（对话）",
+              "通过直接函数调用",
+              "通过文件系统"
+            ],
+            "answer": 1,
+            "explanation": "Agent通过对话消息传递信息，这是核心机制。"
+          },
+          {
+            "question": "谁负责决定下一个发言的Agent？",
+            "options": [
+              "用户",
+              "任一Agent",
+              "调度器（GroupChatManager）",
+              "随机选择"
+            ],
+            "answer": 2,
+            "explanation": "调度器根据对话状态和策略选择下一个发言者。"
+          },
+          {
+            "question": "多Agent协作相比单Agent的主要优势是什么？",
+            "options": [
+              "更快的推理速度",
+              "任务分解和角色专业化",
+              "减少模型调用次数",
+              "无需上下文管理"
+            ],
+            "answer": 1,
+            "explanation": "通过角色分工提高复杂任务的准确性和可维护性。"
+          }
+        ],
+        "difficulty": null,
+        "source": "code",
+        "category": "计划",
+        "template": "t6_code",
+        "generated_at": "2026-08-20T01:19:56.189254",
+        "date": "2026-08-20",
+        "plan_id": 33,
+        "plan_index": 55,
+        "plan_total": 100,
+        "memory_state": null,
+        "next_review_at": null,
+        "review_count": 0,
+        "ease": 2.5,
+        "interval_days": 0,
+        "favorite": 0,
+        "group_index": 11,
+        "batch_index": 1,
+        "intuition": "想象一家创业公司要开发一款新产品。CEO（Agent）负责拆解任务、分配工作，程序员（Agent）负责写代码，设计师（Agent）负责画图，测试员（Agent）负责找bug。他们不是直接面对面开会，而是通过邮件（消息）来回沟通，每个人只关注自己的职责，收到邮件后处理并回复。这样，一个复杂的任务就被分解成多个小任务，由不同专长的Agent并行或串行完成，最终汇总结果。多Agent协作就是模拟这种团队工作模式，让多个LLM Agent通过对话（消息传递）协同解决问题，每个Agent有自己的角色和系统提示词（相当于岗位职责），它们之间的对话由调度器（如AutoGen的GroupChatManager）来管理，决定谁发言、什么时候结束。",
+        "pseudocode": "// 多Agent协作伪代码（以AutoGen为例）\n\n# 定义Agent\nCEO = Agent(role='项目经理', system_message='负责拆解任务、分配工作')\nProgrammer = Agent(role='程序员', system_message='负责编写代码')\nTester = Agent(role='测试员', system_message='负责测试代码并反馈')\n\n# 初始化对话组\nchat_group = GroupChat(agents=[CEO, Programmer, Tester])\nmanager = GroupChatManager(chat_group, max_round=10)\n\n# 用户下达任务\ninitial_task = '写一个Python函数计算斐波那契数列'\n\n# 调度器开始管理对话\nresult = manager.initiate_chat(\n    sender=CEO,\n    message=initial_task\n)\n\n# 对话循环（由调度器驱动）\nwhile not terminated:\n    # 调度器选择下一个发言的Agent\n    next_speaker = manager.select_next_speaker()\n    # 该Agent生成回复\n    reply = next_speaker.generate_reply()\n    # 将回复广播给所有Agent\n    chat_group.broadcast(reply)\n    # 检查是否满足终止条件（如任务完成或达到最大轮次）\n    if manager.is_termination(reply):\n        break\n\n# 输出最终结果\nprint(result.summary)",
+        "key_steps": [
+          "定义多个Agent，每个Agent有专属角色和系统提示词",
+          "创建GroupChat，将Agent加入对话组",
+          "调度器（GroupChatManager）管理对话流程，决定谁发言",
+          "Agent根据收到的消息生成回复，广播给所有Agent",
+          "循环直到满足终止条件（如任务完成或达到最大轮次）"
+        ],
+        "why": "相比单个LLM直接处理复杂任务，多Agent协作将任务分解，每个Agent专注特定领域，能提高准确性和可维护性。它模拟人类团队协作，通过消息传递实现信息共享和迭代改进，解决单Agent难以处理的长流程、多角色任务。朴素方案（单Agent）容易在长对话中丢失上下文或产生偏差，而多Agent通过角色隔离和调度机制，让每个Agent保持专注，同时通过对话历史共享全局信息，实现1+1>2的效果。",
+        "example": "假设用户要求“写一个Python函数计算斐波那契数列”。CEO收到任务后，拆解为“编写代码”和“测试代码”，先指派Programmer发言。Programmer生成代码函数并广播。CEO看到后，指派Tester发言。Tester运行代码（模拟）发现边界情况未处理，反馈给Programmer。Programmer修改后再次广播。Tester确认通过。CEO汇总最终代码作为结果返回。整个过程由调度器控制，每个Agent只负责自己的部分。",
+        "pitfalls": "调度策略不当可能导致某些Agent发言过少或过多，或对话陷入死循环，需设置最大轮次和终止条件。",
+        "review_quiz": [
+          {
+            "question": "每个Agent的“角色”是如何定义的？",
+            "options": [
+              "通过随机分配",
+              "通过系统提示词（system message）",
+              "通过用户手动指定每次",
+              "通过Agent自学习"
+            ],
+            "answer": 1,
+            "explanation": "系统提示词定义了Agent的职责和行为。"
+          },
+          {
+            "question": "对话终止的条件通常包括？",
+            "options": [
+              "达到最大轮次或任务完成",
+              "所有Agent都发言一次",
+              "用户手动停止",
+              "没有新消息"
+            ],
+            "answer": 0,
+            "explanation": "调度器检查终止条件，如最大轮次或任务完成信号。"
+          },
+          {
+            "question": "GroupChatManager的主要功能是什么？",
+            "options": [
+              "生成回复",
+              "管理对话流程和调度",
+              "存储数据",
+              "训练模型"
+            ],
+            "answer": 1,
+            "explanation": "它负责选择发言者、广播消息和判断终止。"
+          }
+        ],
+        "think_answer": "多Agent协作不适用于任务简单、单次对话即可完成的场景，因为引入多个Agent会增加系统开销（更多LLM调用、更长对话历史），导致成本上升和响应延迟。例如，用户问“今天天气如何”，单Agent直接调用API即可，多Agent反而冗余。此外，当任务需要严格的一致性（如数学计算）时，多Agent可能因角色分歧产生不一致结果。具体例子：让多个Agent协作计算“123456*789”，每个Agent可能因上下文干扰而给出不同答案，而单Agent更可靠。因此，多Agent适合复杂、需多角色协作的任务，简单任务应避免使用。",
+        "_date": "2026-08-20"
+      }
+    ]
+  }
+}

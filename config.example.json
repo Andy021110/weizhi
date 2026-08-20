@@ -1,0 +1,25 @@
+{
+  "deepseek_api_key": "sk-你的key填这里",
+  "sources": [
+    {
+      "name": "MIT Technology Review",
+      "rss": "https://www.technologyreview.com/feed/",
+      "category": "科技"
+    },
+    {
+      "name": "Hacker News",
+      "rss": "https://hnrss.org/frontpage",
+      "category": "科技"
+    },
+    {
+      "name": "阮一峰的网络日志",
+      "rss": "http://www.ruanyifeng.com/blog/atom.xml",
+      "category": "科技"
+    },
+    {
+      "name": "少数派",
+      "rss": "https://sspai.com/feed",
+      "category": "技能"
+    }
+  ]
+}

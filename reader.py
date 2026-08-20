@@ -1,0 +1,827 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+微知 · 碎片阅读器（本地服务器）
+
+用 Python 标准库（http.server + json + os）启动一个本地服务器：
+  - 服务 reader.html（根路径 "/"）
+  - 提供 /api/dates  返回 cards/ 下所有日期（倒序）
+  - 提供 /api/cards  返回卡片 JSON，可用 ?date=YYYY-MM-DD 按日期筛选
+
+用法：
+    python reader.py
+    然后浏览器打开 http://localhost:8000
+"""
+import json
+import os
+import time
+import traceback
+from datetime import datetime
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
+
+import trafilatura
+from openai import OpenAI
+
+import db
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PORT = int(os.environ.get("PORT", 8000))
+
+DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+
+
+def load_api_key():
+    """从 config.json 读取 DeepSeek API key。"""
+    config_path = os.path.join(BASE_DIR, "config.json")
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            return cfg.get("deepseek_api_key", "")
+        except (json.JSONDecodeError, OSError):
+            pass
+    return ""
+
+
+def load_config():
+    """从 config.json 读取全部配置，失败返回空 dict。"""
+    config_path = os.path.join(BASE_DIR, "config.json")
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def load_access_token():
+    """从 config.json 读取访问 token（为空则不鉴权）。"""
+    return load_config().get("access_token", "")
+
+
+def load_push_limit():
+    """从 config.json 读取每日推送上限，默认 15。"""
+    try:
+        return int(load_config().get("daily_push_limit", 15) or 15)
+    except (TypeError, ValueError):
+        return 15
+
+
+def load_review_limit():
+    """从 config.json 读取每日复习上限，默认 30。"""
+    try:
+        return int(load_config().get("review_limit", 30) or 30)
+    except (TypeError, ValueError):
+        return 30
+
+
+GRADE_SYSTEM = """你是一位严格的评分老师，负责给学生的简答题打分。
+根据参考答案和评分要点，客观评估学生的回答。
+
+评分规则：
+1. 按评分要点逐条判断学生是否答到，答到一条给相应分值。
+2. 满分 10 分，按答到的要点比例给分。
+3. 宽容看待表达差异，只要意思对了就算答到，不要求字句一致。
+4. 只输出合法的 JSON，不要输出 JSON 以外的文字。
+"""
+
+GRADE_USER = """请给下面的学生回答评分。
+
+【题目】
+{question}
+
+【参考答案】
+{reference_answer}
+
+【评分要点】
+{grading_points}
+
+【学生回答】
+{answer}
+
+输出 JSON（字段名必须一致）：
+{{
+  "score": 0到10的整数,
+  "comment": "总体评语，30字以内",
+  "feedback": "具体反馈：指出学生答到了哪些要点、漏了哪些要点，60字以内"
+}}
+"""
+
+
+def grade_answer(api_key, question, reference_answer, grading_points, answer):
+    """调 DeepSeek 给简答题评分，返回 dict，失败返回 None。"""
+    if not api_key:
+        return {"error": "未配置 API key"}
+    try:
+        client = OpenAI(api_key=api_key, base_url=DEEPSEEK_BASE_URL, timeout=60)
+        points = "\n".join(f"- {p}" for p in (grading_points or []))
+        user_prompt = GRADE_USER.format(
+            question=question,
+            reference_answer=reference_answer,
+            grading_points=points,
+            answer=answer,
+        )
+        resp = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {"role": "system", "content": GRADE_SYSTEM},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.3,
+            response_format={"type": "json_object"},
+        )
+        raw = resp.choices[0].message.content
+        return json.loads(raw)
+    except Exception as e:
+        traceback.print_exc()
+        return {"error": str(e)}
+
+
+def save_card(card):
+    """把卡片存入 SQLite（source_url 去重）。"""
+    return db.save_card(card)
+
+
+def fix_vocab_terms(card):
+    """对 T1 词汇卡：若词是 AI 领域术语/缩写，用术语表强制覆盖释义，避免被当普通英文词翻译（如 RAG→碎布）。"""
+    from prompts import AI_TERMS
+    word = (card.get("word") or "").strip().lower()
+    if word in AI_TERMS:
+        card["definition_cn"] = AI_TERMS[word]["definition"]
+        card["title"] = card.get("word") or word
+        card["pos"] = card.get("pos") or "n."
+        card["pos_label"] = card.get("pos_label") or "名词"
+    return card
+
+
+def create_card(api_key, topic=None, url=None, template="t2_reading"):
+    """在阅读器内新建知识卡。template 支持 t1_vocab/t2_reading/t3_math/t4_trivia/t5_skill。"""
+    if not api_key:
+        return {"error": "未配置 API key"}
+
+    from prompts import TEMPLATES  # 延迟导入，避免循环
+    tpl = TEMPLATES.get(template, TEMPLATES["t2_reading"])
+
+    if url:
+        try:
+            html = trafilatura.fetch_url(url)
+            content = trafilatura.extract(html, include_links=False, include_images=False) if html else ""
+        except Exception:
+            content = ""
+        content = (content or "").strip()
+        if len(content) < 100:
+            return {"error": "无法抓取该链接的正文，请确认链接可访问"}
+        title = topic or url
+    else:
+        content = (topic or "").strip()
+        if len(content) < 2:
+            return {"error": "请输入主题或链接"}
+        title = topic
+
+    content = content[:8000]
+    # 按模板构造 user_prompt
+    if template == "t1_vocab":
+        user_prompt = tpl["user"].format(input=content)
+    elif template in ("t3_math", "t4_trivia", "t5_skill", "t6_code"):
+        user_prompt = tpl["user"].format(topic=content)
+    else:
+        user_prompt = tpl["user"].format(source="用户创建", title=title, content=content, url=url or "")
+
+    client = OpenAI(api_key=api_key, base_url=DEEPSEEK_BASE_URL, timeout=60)
+    try:
+        resp = client.chat.completions.create(
+            model=tpl["model"],
+            messages=[
+                {"role": "system", "content": tpl["system"]},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=tpl["temperature"],
+            response_format={"type": "json_object"},
+        )
+        card = json.loads(resp.choices[0].message.content)
+    except Exception as e:
+        traceback.print_exc()
+        return {"error": str(e)}
+
+    if card.get("skip"):
+        return {"error": card.get("reason", "AI 判定该内容无法生成卡片")}
+
+    # topic 模式下模板产出的 source_url 为空，需补唯一 key 才能正常入库去重
+    if not card.get("source_url"):
+        card["source_url"] = "custom:{ts}:{title}".format(
+            ts=int(time.time()), title=(title or "topic")[:40]
+        )
+    card.setdefault("source", "用户创建")
+    card["_meta"] = {
+        "generated_at": datetime.now().isoformat(),
+        "template": template,
+        "category": {
+            "t1_vocab": "词汇",
+            "t2_reading": "自建",
+            "t3_math": "数学",
+            "t4_trivia": "通识",
+            "t5_skill": "技能",
+        }.get(template, "自建"),
+    }
+
+    if template == "t1_vocab":
+        fix_vocab_terms(card)
+
+    if not save_card(card):
+        return {"error": "该卡片已存在"}
+    return {"success": True, "card": card}
+
+
+def generate_outline(api_key, topic, template="t4_trivia", size=20):
+    """调 AI 拆解学习大纲（按类型 + 规模档）。返回 {title, outline} 或 {error}。"""
+    if not api_key:
+        return {"error": "未配置 API key"}
+    from prompts import PLAN_OUTLINE_SYSTEM, PLAN_OUTLINE_USER, TEMPLATE_META
+    meta = TEMPLATE_META.get(template, TEMPLATE_META["t4_trivia"])
+    client = OpenAI(api_key=api_key, base_url=DEEPSEEK_BASE_URL, timeout=60)
+    try:
+        resp = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {"role": "system", "content": PLAN_OUTLINE_SYSTEM},
+                {"role": "user", "content": PLAN_OUTLINE_USER.format(
+                    template_label=meta["label"], topic=topic, size=size)},
+            ],
+            temperature=0.5,
+            response_format={"type": "json_object"},
+        )
+        data = json.loads(resp.choices[0].message.content)
+        outline = data.get("outline", []) or []
+        # 补 index
+        for i, item in enumerate(outline, 1):
+            if not item.get("index"):
+                item["index"] = i
+        return {"title": data.get("title", topic), "outline": outline}
+    except Exception as e:
+        traceback.print_exc()
+        return {"error": str(e)}
+
+
+def disambiguate_topic(api_key, topic, template="t4_trivia"):
+    """判断主题是否有多个合理方向（供建计划前确认）。返回 {has_ambiguity, interpretations, reason} 或 {error}。"""
+    if not api_key:
+        return {"error": "未配置 API key"}
+    if not topic or len(topic.strip()) < 2:
+        return {"has_ambiguity": False, "interpretations": [], "reason": "主题过短"}
+    from prompts import DISAMBIGUATE_SYSTEM, DISAMBIGUATE_USER, TEMPLATE_META
+    meta = TEMPLATE_META.get(template, TEMPLATE_META["t4_trivia"])
+    client = OpenAI(api_key=api_key, base_url=DEEPSEEK_BASE_URL, timeout=60)
+    try:
+        resp = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {"role": "system", "content": DISAMBIGUATE_SYSTEM},
+                {"role": "user", "content": DISAMBIGUATE_USER.format(template_label=meta["label"], topic=topic)},
+            ],
+            temperature=0.3,
+            response_format={"type": "json_object"},
+        )
+        data = json.loads(resp.choices[0].message.content)
+        return {
+            "has_ambiguity": bool(data.get("has_ambiguity")),
+            "interpretations": (data.get("interpretations") or [])[:3],
+            "reason": data.get("reason", ""),
+        }
+    except Exception as e:
+        traceback.print_exc()
+        return {"error": str(e)}
+
+
+def _group_size(template):
+    """每组的卡数：词汇 10 词一组，其余 5 个一组。"""
+    return 10 if template == "t1_vocab" else 5
+
+
+def _validate_card(card, template):
+    """质量门禁：校验卡片关键指标，返回 (ok, issues)。不达标则重生成。"""
+    issues = []
+    if not card.get("think_question") or not card.get("think_answer"):
+        issues.append("缺思考题或AI回答")
+    elif len(card.get("think_answer") or "") < 150:
+        issues.append("AI回答过短(%d字<150)" % len(card.get("think_answer") or ""))
+    quiz_min = 2 if template in ("t1_vocab", "t4_trivia", "t5_skill") else 3
+    if len(card.get("quiz") or []) < quiz_min:
+        issues.append("quiz不足(%d<%d)" % (len(card.get("quiz") or []), quiz_min))
+    if len(card.get("review_quiz") or []) < 3:
+        issues.append("review_quiz不足(%d<3)" % len(card.get("review_quiz") or []))
+    if template in ("t2_reading", "t3_math", "t5_skill", "t6_code") and not card.get("open_question"):
+        issues.append("缺简答题")
+    return (len(issues) == 0, issues)
+
+
+def _generate_plan_cards(api_key, plan_id, outline, template, base_index, batch_index, total):
+    """按大纲批量生成卡（create_plan / continue_plan 共用）。带质量门禁：不达标重试。返回生成张数。"""
+    from prompts import TEMPLATES
+    tpl = TEMPLATES.get(template, TEMPLATES["t4_trivia"])
+    client = OpenAI(api_key=api_key, base_url=DEEPSEEK_BASE_URL, timeout=60)
+    group_size = _group_size(template)
+
+    generated = 0
+    for i, item in enumerate(outline):
+        idx = base_index + i  # 全局 plan_index
+        point_title = (item.get("title") or "").strip()
+        focus = (item.get("focus") or "").strip()
+        if not point_title:
+            continue
+        if template == "t1_vocab":
+            user_prompt = tpl["user"].format(input=point_title)  # 词汇卡：输入单词本身
+        elif template in ("t3_math", "t4_trivia", "t5_skill", "t6_code"):
+            topic_input = point_title if not focus else f"{point_title}（{focus}）"
+            user_prompt = tpl["user"].format(topic=topic_input)
+        else:  # t2_reading
+            topic_input = point_title if not focus else f"{point_title}（{focus}）"
+            user_prompt = tpl["user"].format(source="学习计划", title=point_title, content=topic_input, url="")
+        card = None
+        for attempt in range(3):  # 质量门禁：最多重试 2 次
+            try:
+                resp = client.chat.completions.create(
+                    model=tpl["model"],
+                    messages=[
+                        {"role": "system", "content": tpl["system"]},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    temperature=tpl["temperature"],
+                    response_format={"type": "json_object"},
+                )
+                card = json.loads(resp.choices[0].message.content)
+            except Exception as e:
+                traceback.print_exc()
+                card = None
+                break
+            if card.get("skip"):
+                break
+            ok, issues = _validate_card(card, template)
+            if ok:
+                break
+            if attempt < 2:
+                user_prompt += "\n注意：上次生成不符合要求（%s），请修正后重新输出完整 JSON。" % "；".join(issues)
+        if not card or card.get("skip"):
+            continue
+        if not card.get("source_url"):
+            card["source_url"] = f"plan:{plan_id}:{idx}:{point_title[:30]}:{int(time.time())}"
+        card.setdefault("source", "学习计划")
+        card["plan_id"] = plan_id
+        card["plan_index"] = idx
+        card["plan_total"] = total
+        card["group_index"] = ((idx - 1) // group_size) + 1
+        card["batch_index"] = batch_index
+        card["_meta"] = {
+            "generated_at": datetime.now().isoformat(),
+            "template": template,
+            "category": {
+                "t1_vocab": "词汇",
+                "t2_reading": "精读",
+                "t3_math": "数学",
+                "t4_trivia": "通识",
+                "t5_skill": "技能",
+            }.get(template, "计划"),
+        }
+        if template == "t1_vocab":
+            fix_vocab_terms(card)
+        if save_card(card):
+            generated += 1
+    return generated
+
+
+def _generate_plan_async(api_key, plan_id, outline, template, total):
+    """后台线程：逐卡生成计划卡，完成后把计划状态从 generating 改为 active。"""
+    try:
+        _generate_plan_cards(api_key, plan_id, outline, template,
+                             base_index=1, batch_index=1, total=total)
+        plan = db.get_plan(plan_id)
+        if plan:
+            plan_update = dict(plan)
+            plan_update["status"] = "active"
+            db.save_plan(plan_update)
+    except Exception:
+        traceback.print_exc()
+
+
+def create_plan(api_key, title, topic, outline, cards_per_day=3, template="t4_trivia", scale=None, pace=None):
+    """建计划 + 后台异步生成卡：立即返回（不阻塞），卡片在后台线程逐张生成。
+    大档（如 100 卡）不会卡住请求；前端用 /api/plan/progress 轮询进度。"""
+    if not api_key:
+        return {"error": "未配置 API key"}
+    if not outline:
+        return {"error": "大纲为空"}
+
+    total = len(outline)
+    scale = scale or total or 20
+    pace = pace or cards_per_day or 3
+    plan_id = db.save_plan({
+        "title": title or topic,
+        "topic": topic,
+        "source": "user",
+        "duration": "long",
+        "total_cards": total,
+        "cards_per_day": pace,
+        "scale": scale,
+        "pace": pace,
+        "batch": 1,
+        "template": template,
+        "status": "generating",
+    })
+
+    import threading
+    t = threading.Thread(target=_generate_plan_async,
+                         args=(api_key, plan_id, outline, template, total),
+                         daemon=True)
+    t.start()
+
+    return {"plan": db.get_plan(plan_id), "generating": True, "total": total}
+
+
+def _continue_plan_async(api_key, plan_id, outline, template, base_index, batch_index, new_total):
+    """后台线程：续学生成新一批卡，完成后把计划状态改回 active。"""
+    try:
+        _generate_plan_cards(api_key, plan_id, outline, template,
+                             base_index=base_index, batch_index=batch_index, total=new_total)
+        plan = db.get_plan(plan_id)
+        if plan:
+            plan_update = dict(plan)
+            plan_update["status"] = "active"
+            db.save_plan(plan_update)
+    except Exception:
+        traceback.print_exc()
+
+
+def continue_plan(api_key, plan_id):
+    """续学：为大主题生成下一批卡（异步）。先出大纲（快），立即返回；卡在后台生成。"""
+    if not api_key:
+        return {"error": "未配置 API key"}
+    plan = db.get_plan(plan_id)
+    if not plan:
+        return {"error": "计划不存在"}
+    template = plan.get("template") or "t4_trivia"
+    scale = plan.get("scale") or 20
+    batch = plan.get("batch") or 1
+    new_batch = batch + 1
+
+    from prompts import PLAN_OUTLINE_SYSTEM, PLAN_OUTLINE_USER, TEMPLATE_META
+    meta = TEMPLATE_META.get(template, TEMPLATE_META["t4_trivia"])
+    client = OpenAI(api_key=api_key, base_url=DEEPSEEK_BASE_URL, timeout=60)
+    topic_prompt = f"{plan.get('topic', '')}（续：第 {new_batch} 批，接续前 {batch} 批，避免重复）"
+    try:
+        resp = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {"role": "system", "content": PLAN_OUTLINE_SYSTEM},
+                {"role": "user", "content": PLAN_OUTLINE_USER.format(
+                    template_label=meta["label"], topic=topic_prompt, size=scale)},
+            ],
+            temperature=0.5,
+            response_format={"type": "json_object"},
+        )
+        data = json.loads(resp.choices[0].message.content)
+        outline = data.get("outline", []) or []
+    except Exception as e:
+        traceback.print_exc()
+        return {"error": str(e)}
+
+    if not outline:
+        return {"error": "续学大纲生成失败"}
+
+    base_index = (batch - 1) * scale + 1
+    new_total = (plan.get("total_cards") or 0) + len(outline)
+
+    # 先更新计划信息 + 标记 generating，再后台生成
+    plan_update = dict(plan)
+    plan_update["total_cards"] = new_total
+    plan_update["batch"] = new_batch
+    plan_update["status"] = "generating"
+    db.save_plan(plan_update)
+
+    import threading
+    t = threading.Thread(target=_continue_plan_async,
+                         args=(api_key, plan_id, outline, template, base_index, new_batch, new_total),
+                         daemon=True)
+    t.start()
+
+    return {"plan": db.get_plan(plan_id), "generating": True, "total": new_total, "batch": new_batch}
+
+
+def list_dates():
+    """返回所有日期（YYYY-MM-DD），倒序。"""
+    return db.list_dates()
+
+
+def load_cards(date=None):
+    """读取卡片。date 为空则读全部；否则只读指定日期。返回列表（已按日期倒序）。"""
+    return db.load_cards(date)
+
+
+class ReaderHandler(BaseHTTPRequestHandler):
+    def _check_auth(self, qs):
+        """校验访问 token。token 从 URL ?key= 或 header X-Auth-Token 读。"""
+        token = load_access_token()
+        if not token:
+            return True  # 未配置 token，不鉴权
+        provided = (qs.get("key") or [None])[0] or self.headers.get("X-Auth-Token", "")
+        return provided == token
+
+    def _forbidden(self):
+        body = b'{"error":"forbidden"}'
+        self.send_response(403)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+        qs = parse_qs(parsed.query)
+
+        if path.startswith("/api/") and not self._check_auth(qs):
+            self._forbidden()
+            return
+
+        if path == "/api/dates":
+            self._send_json({"dates": list_dates()})
+            return
+
+        if path == "/api/cards":
+            date = (qs.get("date") or [None])[0]
+            cards = load_cards(date)
+            # 推送上限：仅对「今天」限制，历史日期可看全部
+            if date == datetime.now().strftime("%Y-%m-%d"):
+                limit = load_push_limit()
+                if len(cards) > limit:
+                    cards = cards[:limit]
+            self._send_json({"cards": cards})
+            return
+
+        if path == "/api/state":
+            self._send_json({
+                "done": db.get_done_dates(),
+                "user_state": db.get_all_state(),
+            })
+            return
+
+        if path == "/api/plans":
+            plans = db.load_plans()
+            for p in plans:
+                p["done_count"] = db.count_plan_done(p["id"])
+            self._send_json({"plans": plans})
+            return
+
+        if path == "/api/plan/cards":
+            plan_id = int((qs.get("id") or [0])[0])
+            self._send_json({
+                "plan": db.get_plan(plan_id),
+                "cards": db.load_plan_cards(plan_id),
+            })
+            return
+
+        if path == "/api/review/queue":
+            today = datetime.now().strftime("%Y-%m-%d")
+            self._send_json({"reviews": db.get_due_reviews(today, limit=load_review_limit())})
+            return
+
+        if path == "/api/search":
+            q = (qs.get("q") or [""])[0]
+            self._send_json({"cards": db.search_cards(q)})
+            return
+
+        if path == "/api/favorites":
+            self._send_json({"cards": db.load_favorites()})
+            return
+
+        if path == "/api/stats":
+            self._send_json(db.stats())
+            return
+
+        self._serve_static(path)
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+        qs = parse_qs(parsed.query)
+
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length)
+        try:
+            req = json.loads(body) if body else {}
+        except json.JSONDecodeError:
+            self._send_json({"error": "无效的 JSON"})
+            return
+
+        if path.startswith("/api/") and path != "/api/verify" and not self._check_auth(qs):
+            self._forbidden()
+            return
+
+        if path == "/api/verify":
+            ok = bool(load_access_token()) and req.get("token", "") == load_access_token()
+            self._send_json({"ok": ok})
+            return
+
+        if path == "/api/grade":
+            result = grade_answer(
+                load_api_key(),
+                req.get("question", ""),
+                req.get("reference_answer", ""),
+                req.get("grading_points", []),
+                req.get("answer", ""),
+            )
+            self._send_json(result)
+            return
+
+        if path == "/api/create":
+            result = create_card(
+                load_api_key(),
+                topic=req.get("topic"),
+                url=req.get("url"),
+                template=req.get("template", "t2_reading"),
+            )
+            self._send_json(result)
+            return
+
+        if path == "/api/done":
+            db.mark_done(req.get("date", ""), req.get("source_url", ""))
+            self._send_json({"success": True})
+            return
+
+        if path == "/api/delete":
+            ok = db.delete_card(req.get("source_url", ""))
+            self._send_json({"success": ok})
+            return
+
+        if path == "/api/state":
+            key = req.get("key", "")
+            if key:
+                db.set_user_state(key, req.get("value", ""))
+            self._send_json({"success": True})
+            return
+
+        if path == "/api/plan/outline":
+            result = generate_outline(
+                load_api_key(),
+                req.get("topic", ""),
+                req.get("template", "t4_trivia"),
+                int(req.get("size", 20) or 20),
+            )
+            self._send_json(result)
+            return
+
+        if path == "/api/plan/disambiguate":
+            result = disambiguate_topic(
+                load_api_key(),
+                req.get("topic", ""),
+                req.get("template", "t4_trivia"),
+            )
+            self._send_json(result)
+            return
+
+        if path == "/api/plan/create":
+            result = create_plan(
+                load_api_key(),
+                req.get("title", ""),
+                req.get("topic", ""),
+                req.get("outline", []),
+                req.get("cards_per_day", 3),
+                req.get("template", "t4_trivia"),
+                req.get("scale"),
+                req.get("pace"),
+            )
+            self._send_json(result)
+            return
+
+        if path == "/api/plan/progress":
+            plan_id = int(req.get("id", 0) or 0)
+            plan = db.get_plan(plan_id)
+            if not plan:
+                self._send_json({"error": "计划不存在"})
+                return
+            cards = db.load_plan_cards(plan_id)
+            self._send_json({
+                "plan_id": plan_id,
+                "generated": len(cards),
+                "total": plan.get("total_cards") or 0,
+                "status": plan.get("status"),
+            })
+            return
+
+        if path == "/api/plan/continue":
+            result = continue_plan(load_api_key(), req.get("id"))
+            self._send_json(result)
+            return
+
+        if path == "/api/plan/update":
+            fields = {k: req.get(k) for k in ("title", "cards_per_day", "status") if k in req}
+            ok = db.update_plan(req.get("id"), fields)
+            self._send_json({"success": ok})
+            return
+
+        if path == "/api/plan/delete":
+            db.delete_plan(req.get("id"))
+            self._send_json({"success": True})
+            return
+
+        if path == "/api/edit":
+            source_url = req.get("source_url", "")
+            fields = {k: req.get(k) for k in ("title", "summary", "body", "core_points", "quiz") if k in req}
+            ok = db.update_card(source_url, fields)
+            self._send_json({"success": ok})
+            return
+
+        if path == "/api/review":
+            result = db.schedule_review(req.get("source_url", ""), req.get("quality", 1))
+            self._send_json({"success": bool(result), "state": result})
+            return
+
+        if path == "/api/review/master":
+            db.mark_mastered(req.get("source_url", ""))
+            self._send_json({"success": True})
+            return
+
+        if path == "/api/review/skip":
+            db.skip_review_today(req.get("source_url", ""))
+            self._send_json({"success": True})
+            return
+
+        if path == "/api/favorite":
+            ok = db.toggle_favorite(req.get("source_url", ""), req.get("favorite", True))
+            self._send_json({"success": ok})
+            return
+
+        self.send_error(404)
+
+    def _serve_static(self, path):
+        if path in ("/", "/index.html"):
+            file_path = os.path.join(BASE_DIR, "reader.html")
+        else:
+            rel = path.lstrip("/")
+            file_path = os.path.normpath(os.path.join(BASE_DIR, rel))
+            if not file_path.startswith(BASE_DIR):
+                self.send_error(403)
+                return
+
+        if not os.path.isfile(file_path):
+            self.send_error(404)
+            return
+
+        content_type = "text/html; charset=utf-8"
+        if file_path.endswith(".js"):
+            content_type = "application/javascript; charset=utf-8"
+        elif file_path.endswith(".css"):
+            content_type = "text/css; charset=utf-8"
+        elif file_path.endswith(".json"):
+            content_type = "application/json; charset=utf-8"
+        elif file_path.endswith(".svg"):
+            content_type = "image/svg+xml"
+        elif file_path.endswith(".png"):
+            content_type = "image/png"
+        elif file_path.endswith(".ico"):
+            content_type = "image/x-icon"
+
+        with open(file_path, "rb") as f:
+            body = f.read()
+
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_json(self, obj):
+        body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, fmt, *args):
+        # 静默日志，保持终端输出干净
+        pass
+
+
+def main():
+    db.init_db()
+    server = ThreadingHTTPServer(("127.0.0.1", PORT), ReaderHandler)
+    print("=" * 44)
+    print("  微知 · 碎片阅读器已启动")
+    print(f"  请在浏览器打开： http://localhost:{PORT}")
+    print(f"  数据库： {db.DB_PATH}")
+    print(f"  可用日期： {', '.join(list_dates()) or '（无）'}")
+    print("  按 Ctrl+C 停止")
+    print("=" * 44)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\n已停止。")
+    finally:
+        server.server_close()
+
+
+if __name__ == "__main__":
+    main()
