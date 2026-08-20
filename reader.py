@@ -28,6 +28,7 @@ import db
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("PORT", 8000))
 REPORTS_DIR = os.path.join(BASE_DIR, "quality_reports")
+BACKUP_DIR = os.path.join(REPORTS_DIR, "backups")
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 
@@ -553,6 +554,49 @@ def regen_card(api_key, source_url):
     return {"success": True, "card": card}
 
 
+def find_backup(source_url):
+    """按 source_url 找最新备份文件（backups/日期/md5.json），找不到返回 None。"""
+    import hashlib
+    if not source_url:
+        return None
+    h = hashlib.md5(source_url.encode("utf-8")).hexdigest()
+    if not os.path.isdir(BACKUP_DIR):
+        return None
+    try:
+        for d in sorted(os.listdir(BACKUP_DIR), reverse=True):
+            p = os.path.join(BACKUP_DIR, d, h + ".json")
+            if os.path.isfile(p):
+                return p
+    except OSError:
+        return None
+    return None
+
+
+def rollback_card(source_url):
+    """回滚自动重生成：删新卡 + 恢复备份的旧卡与完成记录。返回 {success} 或 {error}。"""
+    backup_path = find_backup(source_url)
+    if not backup_path:
+        return {"error": "未找到该卡的备份，无法回滚"}
+    try:
+        with open(backup_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {"error": "备份文件读取失败"}
+    card = data.get("card") or {}
+    if not card.get("source_url"):
+        return {"error": "备份内容异常"}
+    # 删新卡（自动重生成产生的那张）
+    new_src = data.get("new_source_url")
+    if new_src and new_src != card["source_url"]:
+        db.delete_card(new_src)
+    # 恢复旧卡（先删可能残留的旧卡再存，保证幂等）
+    db.delete_card(card["source_url"])
+    db.save_card(card, date=data.get("card_date") or card.get("date"))
+    for d in (data.get("progress_dates") or []):
+        db.restore_progress(d, card["source_url"])
+    return {"success": True, "card": card}
+
+
 def create_plan(api_key, title, topic, outline, cards_per_day=3, template="t4_trivia", scale=None, pace=None):
     """建计划 + 后台异步生成卡：立即返回（不阻塞），卡片在后台线程逐张生成。
     大档（如 100 卡）不会卡住请求；前端用 /api/plan/progress 轮询进度。"""
@@ -813,6 +857,15 @@ class ReaderHandler(BaseHTTPRequestHandler):
             self._send_json({"success": True})
             return
 
+        if path == "/api/event":
+            db.record_event(
+                req.get("date") or datetime.now().strftime("%Y-%m-%d"),
+                req.get("event", ""),
+                req.get("source_url", ""),
+            )
+            self._send_json({"success": True})
+            return
+
         if path == "/api/plan/outline":
             result = generate_outline(
                 load_api_key(),
@@ -911,6 +964,11 @@ class ReaderHandler(BaseHTTPRequestHandler):
 
         if path == "/api/regen":
             result = regen_card(load_api_key(), req.get("source_url", ""))
+            self._send_json(result)
+            return
+
+        if path == "/api/rollback":
+            result = rollback_card(req.get("source_url", ""))
             self._send_json(result)
             return
 

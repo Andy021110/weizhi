@@ -176,6 +176,7 @@ def usage_metrics():
         "mastered": mastered,
         "reviewing_total": total,
         "streak": streak,
+        "usage_today": db.events_on_date(today),  # M2：思考题/简答/日历/搜索使用率
     }
 
 
@@ -223,6 +224,97 @@ def cleanup(days=30):
                 os.remove(os.path.join(REPORTS_DIR, f))
             except OSError:
                 pass
+
+
+def _backup_card(card, backup_dir):
+    """自动重生成前把旧卡完整备份（含完成记录）。返回相对路径 backups/{日期}/{md5}.json。"""
+    import hashlib
+    src = card.get("source_url") or ""
+    h = hashlib.md5(src.encode("utf-8")).hexdigest()
+    day = card.get("date") or datetime.now().strftime("%Y-%m-%d")
+    d = os.path.join(backup_dir, day)
+    os.makedirs(d, exist_ok=True)
+    data = {
+        "source_url": src,
+        "card": card,
+        "card_date": day,
+        "progress_dates": db.progress_dates_of(src),
+    }
+    path = os.path.join(d, h + ".json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    return os.path.join(day, h + ".json")
+
+
+def _backup_count(source_url, backup_dir):
+    """该卡已有备份数（用于限制同一卡最多自动修复 2 次，防反复烧钱）。"""
+    import hashlib
+    if not source_url or not os.path.isdir(backup_dir):
+        return 0
+    h = hashlib.md5(source_url.encode("utf-8")).hexdigest()
+    n = 0
+    for root, _dirs, files in os.walk(backup_dir):
+        if h + ".json" in files:
+            n += 1
+    return n
+
+
+def _update_backup_new(backup_dir, rel, new_src):
+    """regen 成功后把新卡 source_url 补进备份文件（回滚时删除新卡用）。"""
+    if not rel or not new_src:
+        return
+    try:
+        p = os.path.join(backup_dir, rel)
+        with open(p, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        data["new_source_url"] = new_src
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except (OSError, json.JSONDecodeError):
+        pass
+
+
+def auto_regen(api_key, badcases, backup_dir, max_actions=3):
+    """M3 安全子集：对可自动修复的 badcase 自动重生成。
+    - AI 打分 ≤2.0（最差的一批）→ 自动
+    - 规则命中（排除「重复卡」，重生成无意义）→ 自动
+    - 每轮最多 max_actions 张；同一卡最多自动修复 2 次（防反复烧钱）
+    重生成前备份旧卡（回滚用）。返回动作列表，写入报告 auto_actions。"""
+    from reader import regen_card  # 延迟导入避免循环
+    candidates = []
+    for b in badcases:
+        if b["source"] == "ai" and (b.get("score") is not None) and b["score"] <= 2.0:
+            candidates.append(b)
+        elif b["source"] == "rule" and "重复卡" not in (b.get("issues") or []):
+            candidates.append(b)
+    actions = []
+    for b in candidates[:max_actions]:
+        src = b["source_url"]
+        old = db.get_card(src)
+        if not old:
+            actions.append({"source_url": src, "action": "regen", "success": False, "reason": "卡不存在"})
+            continue
+        if _backup_count(src, backup_dir) >= 2:
+            actions.append({"source_url": src, "action": "regen", "success": False, "reason": "已自动修复2次，转人工"})
+            continue
+        backup = _backup_card(old, backup_dir)
+        result = regen_card(api_key, src)
+        ok = bool(result.get("success"))
+        new_src = (result.get("card") or {}).get("source_url") if ok else None
+        if ok:
+            _update_backup_new(backup_dir, backup, new_src)
+        actions.append({
+            "source_url": src,
+            "title": old.get("title") or "",
+            "score": b.get("score"),
+            "reason": b.get("reason", ""),
+            "action": "regen",
+            "success": ok,
+            "error": None if ok else result.get("error"),
+            "backup": backup if ok else None,
+            "new_source_url": new_src,
+        })
+    return actions
 
 
 def main():
@@ -280,14 +372,19 @@ def main():
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return
 
+    # M3 安全子集：自动修复（低分/可修 badcase 自动重生成，带备份可回滚）
+    report["auto_actions"] = auto_regen(api_key, badcases, os.path.join(REPORTS_DIR, "backups"))
+
     os.makedirs(REPORTS_DIR, exist_ok=True)
     path = os.path.join(REPORTS_DIR, report["date"] + ".json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
     cleanup()
-    print("已生成质检报告：%s（检查 %d 张，badcase %d 个，通过率 %s）" % (
+    ok_actions = [a for a in (report.get("auto_actions") or []) if a.get("success")]
+    print("已生成质检报告：%s（检查 %d 张，badcase %d 个，通过率 %s，自动修复 %d/%d 成功）" % (
         path, checked, len(badcases),
-        ("%.1f%%" % (report["pass_rate"] * 100)) if report["pass_rate"] is not None else "-"))
+        ("%.1f%%" % (report["pass_rate"] * 100)) if report["pass_rate"] is not None else "-",
+        len(ok_actions), len(report.get("auto_actions") or [])))
 
 
 if __name__ == "__main__":

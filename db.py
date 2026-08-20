@@ -62,6 +62,13 @@ CREATE TABLE IF NOT EXISTS reviews (
   interval_before INTEGER,
   interval_after INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  date TEXT,
+  event TEXT,
+  source_url TEXT
+);
 """
 
 
@@ -822,3 +829,64 @@ def mastery_rate():
     finally:
         conn.close()
     return (round(mastered / total, 3) if total else None, mastered, total)
+
+
+# ===== M2 前端埋点（events 表）=====
+
+def record_event(date, event, source_url=None):
+    """记一条前端埋点事件（think_open/open_submit/calendar_open/search_use）。"""
+    if not event:
+        return
+    conn = _conn()
+    try:
+        conn.execute(
+            "INSERT INTO events (date, event, source_url) VALUES (?, ?, ?)",
+            (date or datetime.now().strftime("%Y-%m-%d"), event, source_url or ""),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def events_on_date(date):
+    """某日各事件次数 {event: count}。"""
+    conn = _conn()
+    try:
+        rows = conn.execute(
+            "SELECT event, COUNT(*) AS n FROM events WHERE date = ? GROUP BY event",
+            (date,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return {r["event"]: r["n"] for r in rows}
+
+
+# ===== M3 自动修复：备份 / 回滚辅助 =====
+
+def progress_dates_of(source_url):
+    """某卡的所有完成记录日期（备份用，供回滚恢复）。"""
+    if not source_url:
+        return []
+    conn = _conn()
+    try:
+        rows = conn.execute(
+            "SELECT date FROM progress WHERE card_source_url = ?", (source_url,)
+        ).fetchall()
+    finally:
+        conn.close()
+    return [r["date"] for r in rows]
+
+
+def restore_progress(date, source_url):
+    """回滚时恢复一条完成记录。"""
+    if not date or not source_url:
+        return
+    conn = _conn()
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO progress (date, card_source_url, done) VALUES (?, ?, 1)",
+            (date, source_url),
+        )
+        conn.commit()
+    finally:
+        conn.close()
