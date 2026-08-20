@@ -447,6 +447,7 @@
   .task-card-icon { width: 42px; height: 42px; border-radius: 12px; background: var(--green-soft); display: flex; align-items: center; justify-content: center; font-size: 21px; flex: 0 0 42px; }
   .task-card-body { flex: 1; min-width: 0; }
   .task-card-title { font-size: 15px; font-weight: 700; }
+  .task-tpl { display: inline-block; font-size: 10px; font-weight: 700; color: #fff; background: var(--primary); border-radius: 4px; padding: 1px 5px; margin-right: 6px; vertical-align: 2px; }
   .task-card-progress { font-size: 12px; color: var(--text-3); margin-top: 3px; }
   .task-card-actions { display: flex; flex-direction: column; gap: 1px; flex: 0 0 auto; }
   .task-card-actions .edit-btn { font-size: 11px; padding: 3px 6px; }
@@ -481,6 +482,23 @@
   .template-row { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
   .tpl-btn { border: 1px solid var(--line); background: var(--card); color: var(--text-2); font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 999px; cursor: pointer; }
   .tpl-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+  /* 质检报告弹窗 */
+  .qc-metrics-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0 14px; }
+  .qc-metric { background: var(--bg); border-radius: var(--radius-sm); padding: 10px; text-align: center; }
+  .qc-metric-num { font-size: 18px; font-weight: 800; color: var(--primary); }
+  .qc-metric-label { font-size: 11px; color: var(--text-3); margin-top: 2px; }
+  .qc-none { color: var(--primary); font-size: 14px; font-weight: 600; padding: 14px 0; }
+  .qc-badcase-title { font-size: 13px; font-weight: 700; margin: 6px 0 8px; }
+  .qc-badcase { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 8px; }
+  .qc-badcase-head { display: flex; justify-content: space-between; align-items: center; font-size: 13px; gap: 8px; }
+  .qc-badcase-head b { overflow-wrap: break-word; }
+  .qc-score { font-size: 11px; color: var(--red); font-weight: 700; flex-shrink: 0; }
+  .qc-badcase-why { font-size: 12px; color: var(--text-2); margin: 4px 0; line-height: 1.5; }
+  .qc-issues { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+  .qc-issue { font-size: 11px; background: rgba(190,86,47,.1); color: #be562f; border-radius: 999px; padding: 2px 8px; }
+  .qc-regen { font-size: 12px; font-weight: 700; color: #fff; background: var(--primary); border: none; border-radius: 999px; padding: 6px 14px; cursor: pointer; }
+  .qc-regen:disabled { opacity: .6; cursor: not-allowed; }
   .onboard-overlay { position: fixed; inset: 0; z-index: 110; background: rgba(43,43,40,.5); display: flex; align-items: center; justify-content: center; padding: 24px; }
   .onboard-box { width: 100%; max-width: 360px; background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 28px 24px; }
   .onboard-title { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
@@ -505,6 +523,7 @@
     <div class="stat-bar">
       <span class="stat-item">连击 <b id="streakNum">0</b> 天</span>
       <span class="stat-item">今日完成 <b id="todayDone">0</b> 张</span>
+      <button class="review-btn" id="qcBtn">📋 质检</button>
       <button class="review-btn" id="reviewBtn" style="display:none;margin-left:auto">待复习 <b id="reviewCount">0</b></button>
     </div>
     <div class="search-box">
@@ -551,6 +570,17 @@
     </div>
   </div>
 
+  <!-- 质检报告弹层 -->
+  <div class="create-overlay" id="qcOverlay" style="display:none">
+    <div class="create-box" style="max-width:520px">
+      <div class="create-box-title">📋 质量巡检</div>
+      <div class="create-hint" id="qcMeta"></div>
+      <div id="qcMetrics"></div>
+      <div id="qcBadcases"></div>
+      <button class="create-cancel" id="qcClose" style="margin-top:12px">关闭</button>
+    </div>
+  </div>
+
   <!-- 冷启动引导 -->
   <div class="onboard-overlay" id="onboardOverlay" style="display:none">
     <div class="onboard-box">
@@ -565,9 +595,10 @@
   <div class="create-overlay" id="planOverlay" style="display:none">
     <div class="create-box">
       <div class="create-box-title">系统学习计划</div>
-      <div class="create-hint">选类型 + 输入主题，AI 帮你拆成学习大纲</div>
+      <div class="create-hint">AI 自动判断类型，或手动指定 + 输入主题</div>
       <div class="template-row" id="planTemplateRow">
-        <button class="tpl-btn active" data-tpl="t4_trivia">通识</button>
+        <button class="tpl-btn active" data-tpl="__auto__">✨ 自动</button>
+        <button class="tpl-btn" data-tpl="t4_trivia">通识</button>
         <button class="tpl-btn" data-tpl="t1_vocab">词汇</button>
         <button class="tpl-btn" data-tpl="t2_reading">精读</button>
         <button class="tpl-btn" data-tpl="t3_math">数学</button>
@@ -829,6 +860,11 @@
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  // 清洗 AI 生成的选项：去掉「A. / B、/ C：」等前缀，避免渲染成 A. A. xxx
+  function cleanOpt(o) {
+    return String(o == null ? '' : o).replace(/^[A-D][.、．:：]\s*/, '');
   }
 
   function difficultyClass(d) {
@@ -1229,7 +1265,7 @@
 
     var letters = ['A', 'B', 'C', 'D'];
     html += q.options.map(function (opt, i) {
-      return '<button class="option" data-opt="' + i + '"><span class="key">' + letters[i] + '</span><span>' + escapeHtml(opt) + '</span></button>';
+      return '<button class="option" data-opt="' + i + '"><span class="key">' + letters[i] + '</span><span>' + escapeHtml(cleanOpt(opt)) + '</span></button>';
     }).join('');
 
     html += '<div class="explain" id="explainBox" style="display:none"></div>';
@@ -1417,6 +1453,8 @@
   var planTitle = '';
   var createTemplate = 't2_reading';
   var planTemplate = 't4_trivia';
+  var planAutoMode = true;   // true=AI 自动判断类型；false=手动指定
+  var TPL_LABEL = { 't1_vocab': '词汇', 't2_reading': '精读', 't3_math': '数学', 't4_trivia': '通识', 't5_skill': '技能', 't6_code': '代码' };
   var planScale = 50;
   var planPace = 3;
 
@@ -1438,6 +1476,7 @@
     if (!shown.length) { sec.style.display = 'none'; return; }
     sec.style.display = 'block';
     var iconMap = { 't1_vocab': '📖', 't2_reading': '📰', 't3_math': '🔢', 't4_trivia': '💡', 't5_skill': '🛠', 't6_code': '💻' };
+    var tplLabel = { 't1_vocab': '词汇', 't2_reading': '精读', 't3_math': '数学', 't4_trivia': '通识', 't5_skill': '技能', 't6_code': '代码' };
     sec.innerHTML = '<div class="plan-section-title">我的任务</div>' +
       shown.map(function (p) {
         var total = p.total_cards || 0;
@@ -1452,7 +1491,7 @@
         return '<div class="task-card' + (isPaused ? ' paused' : '') + '" data-plan="' + p.id + '">' +
           '<div class="task-card-icon">' + (iconMap[p.template] || '📚') + '</div>' +
           '<div class="task-card-body">' +
-            '<div class="task-card-title">' + escapeHtml(p.title || p.topic) + batchInfo + '</div>' +
+            '<div class="task-card-title">' + (tplLabel[p.template] ? '<span class="task-tpl">' + tplLabel[p.template] + '</span>' : '') + escapeHtml(p.title || p.topic) + batchInfo + '</div>' +
             '<div class="task-card-progress">' + sub + '</div>' +
             '<div class="plan-progress-bar"><div class="plan-progress-fill" style="width:' + pct + '%"></div></div>' +
           '</div>' +
@@ -1544,7 +1583,7 @@
     quiz.forEach(function (q, qi) {
       html += '<div class="task-quiz-item"><div class="task-quiz-q">' + (qi + 1) + '. ' + escapeHtml(q.question) + '</div><div class="task-quiz-opts">';
       q.options.forEach(function (opt, oi) {
-        html += '<button type="button" class="task-opt" data-correct="' + (oi === q.answer ? '1' : '0') + '">' + letters[oi] + '. ' + escapeHtml(opt) + '</button>';
+        html += '<button type="button" class="task-opt" data-correct="' + (oi === q.answer ? '1' : '0') + '">' + letters[oi] + '. ' + escapeHtml(cleanOpt(opt)) + '</button>';
       });
       html += '</div><div class="task-quiz-explain" style="display:none">' + escapeHtml(q.explanation || '') + '</div></div>';
     });
@@ -1552,11 +1591,22 @@
     return html;
   }
 
+  function renderTaskOpen(c) {
+    var oq = c.open_question;
+    if (!oq) return '';
+    return '<div class="section"><div class="section-title">简答题</div><div class="open-q-box">' +
+      '<div class="open-q-text">' + escapeHtml(oq.question) + '</div>' +
+      '<textarea class="task-open-answer" placeholder="写下你的理解..."></textarea>' +
+      '<button class="task-open-submit" type="button">提交评分</button>' +
+      '<div class="task-open-result" style="display:none"></div>' +
+    '</div></div>';
+  }
+
   function renderTaskCard() {
     var c = taskState.cards[taskState.index];
     var total = taskState.cards.length;
     $('taskProgress').textContent = '组 ' + taskState.groupIndex + ' · 第 ' + (taskState.index + 1) + ' / ' + total + ' 张';
-    $('taskBody').innerHTML = '<div class="task-flash">' + renderCardContent(c) + renderTaskQuiz(c) + '</div>';
+    $('taskBody').innerHTML = '<div class="task-flash">' + renderCardContent(c) + renderTaskQuiz(c) + renderTaskOpen(c) + '</div>';
     $('taskBody').scrollTop = 0;
     $('taskPrev').disabled = taskState.index === 0;
     var last = taskState.index === total - 1;
@@ -1601,6 +1651,9 @@
     $('planOutlineBtn').textContent = '生成学习大纲';
     planOutline = [];
     planTitle = '';
+    planAutoMode = true;   // 每次打开默认 AI 自动判断类型
+    planTemplate = 't4_trivia';
+    markPlanTplActive('__auto__');
     setTimeout(function () { $('planInput').focus(); }, 50);
   }
 
@@ -1610,17 +1663,18 @@
 
   var disambigState = null;
 
-  function generateOutline() {
-    var topic = $('planInput').value.trim();
-    var msg = $('planMsg');
-    msg.className = 'create-msg';
-    msg.textContent = '';
-    if (!topic) { msg.className = 'create-msg err'; msg.textContent = '请输入主题'; return; }
-    $('disambigBox').style.display = 'none';
+  function markPlanTplActive(tpl) {
+    var btns = document.querySelectorAll('#planTemplateRow .tpl-btn');
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].classList.toggle('active', btns[i].getAttribute('data-tpl') === tpl);
+    }
+  }
+
+  function disambiguateThenOutline(topic, template) {
     var btn = $('planOutlineBtn');
     btn.disabled = true;
     btn.textContent = '理解中...';
-    postJSON('/api/plan/disambiguate', { topic: topic, template: planTemplate }).then(function (r) { return r.json(); }).then(function (data) {
+    postJSON('/api/plan/disambiguate', { topic: topic, template: template }).then(function (r) { return r.json(); }).then(function (data) {
       if (data.error || !data.has_ambiguity || !(data.interpretations || []).length) {
         // 无歧义（或消歧失败）→ 直接出大纲
         fetchOutline(topic);
@@ -1631,10 +1685,54 @@
       renderDisambig(data.interpretations);
       btn.disabled = false;
       btn.textContent = '重新拆解';
-      msg.className = 'create-msg';
-      msg.textContent = '';
     }).catch(function () {
       fetchOutline(topic);
+    });
+  }
+
+  function generateOutline() {
+    var topic = $('planInput').value.trim();
+    var msg = $('planMsg');
+    msg.className = 'create-msg';
+    msg.textContent = '';
+    if (!topic) { msg.className = 'create-msg err'; msg.textContent = '请输入主题'; return; }
+    $('disambigBox').style.display = 'none';
+    var btn = $('planOutlineBtn');
+    btn.disabled = true;
+    if (!planAutoMode) {
+      // 手动指定类型：走原消歧 → 大纲
+      disambiguateThenOutline(topic, planTemplate);
+      return;
+    }
+    // 自动模式：AI 先判断类型 + 方向歧义（一次调用，可感知结果）
+    btn.textContent = '识别类型中...';
+    postJSON('/api/plan/classify', { topic: topic }).then(function (r) { return r.json(); }).then(function (data) {
+      if (data.error || !data.template) {
+        // 识别失败 → 降级：用当前类型走手动流程
+        msg.className = 'create-msg err';
+        msg.textContent = '类型识别失败（' + (data.error || '未知') + '），已用当前类型';
+        disambiguateThenOutline(topic, planTemplate);
+        return;
+      }
+      planTemplate = data.template;
+      markPlanTplActive(data.template);   // 按钮切到识别出的类型（可感知：不满意可手动改）
+      msg.className = 'create-msg ok';
+      msg.textContent = '✨ 已识别为「' + (data.label || TPL_LABEL[data.template] || '') + '」' + (data.reason ? ' · ' + data.reason : '');
+      btn.textContent = '拆解中...';
+      if (data.has_ambiguity && (data.interpretations || []).length) {
+        // 类型已定但方向有歧义 → 让用户选方向
+        disambigState = { topic: topic, interpretations: data.interpretations };
+        renderDisambig(data.interpretations);
+        btn.disabled = false;
+        btn.textContent = '重新拆解';
+        return;
+      }
+      fetchOutline(topic);
+    }).catch(function () {
+      // 网络错误 → 降级走手动流程
+      msg.className = 'create-msg err';
+      msg.textContent = '类型识别失败（网络），已用当前类型';
+      disambiguateThenOutline(topic, planTemplate);
     });
   }
 
@@ -1905,7 +2003,7 @@
     var html = '<div class="review-q-progress">第 ' + (st.index + 1) + ' / ' + st.quiz.length + ' 题</div>';
     html += '<div class="review-question">' + escapeHtml(q.question) + '</div>';
     html += opts.map(function (o, i) {
-      return '<button type="button" class="option review-opt" data-correct="' + (o.correct ? '1' : '0') + '"><span class="key">' + letters[i] + '</span><span>' + escapeHtml(o.text) + '</span></button>';
+      return '<button type="button" class="option review-opt" data-correct="' + (o.correct ? '1' : '0') + '"><span class="key">' + letters[i] + '</span><span>' + escapeHtml(cleanOpt(o.text)) + '</span></button>';
     }).join('');
     html += '<div class="review-explain" style="display:none">' + escapeHtml(q.explanation || '') + '</div>';
     html += '<button class="review-next" id="reviewNextBtn" style="display:none"></button>';
@@ -2061,6 +2159,79 @@
     $('onboardOverlay').style.display = 'flex';
   }
 
+  // ---------- 质量巡检（daily_check.py 每日 3:30 产出报告） ----------
+  function openQcReport() {
+    fetchJSON('/api/report/latest').then(function (data) {
+      var report = data.report;
+      if (!report) { alert('暂无质检报告（每天 3:30 自动巡检，最早今晚生成）'); return; }
+      renderQcReport(report);
+    }).catch(function () { alert('网络错误，请重试'); });
+  }
+
+  function pct(v) { return v != null ? Math.round(v * 100) + '%' : '-'; }
+
+  function renderQcReport(r) {
+    $('qcOverlay').style.display = 'flex';
+    $('qcMeta').textContent = r.date + ' · 检查 ' + (r.checked || 0) + ' 张 · 通过率 ' + pct(r.pass_rate) + ' · 平均分 ' + (r.avg_score != null ? r.avg_score : '-');
+    var m = r.metrics || {};
+    var cells = [
+      ['今日学习', m.study_today != null ? m.study_today : '-'],
+      ['复习完成', pct(m.compliance_today)],
+      ['复习正确率', pct(m.accuracy_today)],
+      ['掌握率', pct(m.mastery_rate)],
+      ['连击', m.streak || '-'],
+      ['待复习', m.due_today != null ? m.due_today : '-']
+    ];
+    $('qcMetrics').innerHTML = '<div class="qc-metrics-grid">' + cells.map(function (c) {
+      return '<div class="qc-metric"><div class="qc-metric-num">' + c[1] + '</div><div class="qc-metric-label">' + c[0] + '</div></div>';
+    }).join('') + '</div>';
+    var list = r.badcases || [];
+    var box = $('qcBadcases');
+    if (!list.length) {
+      box.innerHTML = '<div class="qc-none">✅ 今日未发现 badcase</div>';
+      return;
+    }
+    box.innerHTML = '<div class="qc-badcase-title">发现 ' + list.length + ' 个 badcase：</div>' +
+      list.map(function (b, i) {
+        var issues = (b.issues || []).map(function (x) { return '<span class="qc-issue">' + escapeHtml(x) + '</span>'; }).join('');
+        return '<div class="qc-badcase">' +
+          '<div class="qc-badcase-head"><b>' + (i + 1) + '. ' + escapeHtml(b.title || '(无标题)') + '</b>' +
+          '<span class="qc-score">' + (b.score != null ? b.score + ' 分' : '规则') + '</span></div>' +
+          '<div class="qc-badcase-why">' + escapeHtml(b.reason || '') + '</div>' +
+          '<div class="qc-issues">' + issues + '</div>' +
+          '<button type="button" class="qc-regen" data-url="' + escapeHtml(b.source_url) + '">重新生成</button>' +
+        '</div>';
+      }).join('');
+    var regenBtns = box.querySelectorAll('.qc-regen');
+    for (var i = 0; i < regenBtns.length; i++) {
+      regenBtns[i].addEventListener('click', function () {
+        regenBadcase(this.getAttribute('data-url'), this);
+      });
+    }
+  }
+
+  function regenBadcase(sourceUrl, btn) {
+    if (!confirm('重新生成该卡片？将删除旧卡并按原类型/原位置重新生成。')) return;
+    btn.disabled = true;
+    btn.textContent = '生成中...';
+    postJSON('/api/regen', { source_url: sourceUrl }).then(function (r) { return r.json(); }).then(function (data) {
+      if (data.success) {
+        btn.textContent = '✅ 已重新生成';
+        setTimeout(function () { btn.textContent = '重新生成'; btn.disabled = false; }, 2000);
+        loadDates().then(loadCards);
+        loadPlans();
+      } else {
+        alert('重生成失败：' + (data.error || '未知错误'));
+        btn.textContent = '重新生成';
+        btn.disabled = false;
+      }
+    }).catch(function () {
+      alert('网络错误，请重试');
+      btn.textContent = '重新生成';
+      btn.disabled = false;
+    });
+  }
+
   // ---------- 初始化 ----------
   $('backBtn').addEventListener('click', goBack);
   $('createBtn').addEventListener('click', openCreate);
@@ -2112,10 +2283,56 @@
         else if (opts[i] === opt) opts[i].classList.add('task-opt-wrong');
       }
       if (explain) explain.style.display = 'block';
+      return;
+    }
+    // 任务翻卡里的简答题提交评分
+    var openBtn = e.target.closest ? e.target.closest('.task-open-submit') : null;
+    if (openBtn) {
+      var box = openBtn.closest('.open-q-box');
+      var tc = taskState.cards[taskState.index];
+      var toq = tc && tc.open_question;
+      if (!toq) return;
+      var tAnswer = ((box.querySelector('.task-open-answer') || {}).value || '').trim();
+      var tResult = box.querySelector('.task-open-result');
+      if (!tAnswer) { alert('请先写下你的回答'); return; }
+      openBtn.disabled = true;
+      openBtn.textContent = '评分中...';
+      postJSON('/api/grade', {
+        question: toq.question,
+        reference_answer: toq.reference_answer,
+        grading_points: toq.grading_points || [],
+        answer: tAnswer
+      }).then(function (r) { return r.json(); }).then(function (data) {
+        openBtn.disabled = false;
+        openBtn.textContent = '已提交';
+        tResult.style.display = 'block';
+        var refHtml = toq.reference_answer
+          ? '<div class="open-ref"><div class="open-ref-title">参考答案</div><div class="open-ref-body">' + escapeHtml(toq.reference_answer) + '</div></div>' : '';
+        if (data.error) {
+          tResult.innerHTML = '<div class="open-error">评分失败：' + escapeHtml(data.error) + '</div>' + refHtml;
+        } else {
+          tResult.innerHTML =
+            '<div class="open-done">✓ 已完成 · 看完答案即可过</div>' +
+            '<div class="open-score">' + data.score + '<span> / 10</span></div>' +
+            '<div class="open-comment">' + escapeHtml(data.comment || '') + '</div>' +
+            '<div class="open-feedback">' + escapeHtml(data.feedback || '') + '</div>' + refHtml;
+        }
+      }).catch(function () {
+        openBtn.disabled = false;
+        openBtn.textContent = '重试';
+        tResult.style.display = 'block';
+        tResult.innerHTML = '<div class="open-error">网络错误，请重试</div>';
+      });
+      return;
     }
   });
   $('favBtn').addEventListener('click', showFavorites);
   $('statsBtn').addEventListener('click', showStats);
+  $('qcBtn').addEventListener('click', openQcReport);
+  $('qcClose').addEventListener('click', function () { $('qcOverlay').style.display = 'none'; });
+  $('qcOverlay').addEventListener('click', function (e) {
+    if (e.target === $('qcOverlay')) $('qcOverlay').style.display = 'none';
+  });
   var searchTimer = null;
   $('searchInput').addEventListener('input', function () {
     clearTimeout(searchTimer);
@@ -2133,9 +2350,15 @@
   var planTplBtns = document.querySelectorAll('#planTemplateRow .tpl-btn');
   for (var pt = 0; pt < planTplBtns.length; pt++) {
     planTplBtns[pt].addEventListener('click', function () {
-      planTemplate = this.getAttribute('data-tpl');
+      var tpl = this.getAttribute('data-tpl');
       for (var ps = 0; ps < planTplBtns.length; ps++) planTplBtns[ps].classList.remove('active');
       this.classList.add('active');
+      if (tpl === '__auto__') {
+        planAutoMode = true;   // 切回 AI 自动判断
+      } else {
+        planAutoMode = false;  // 手动指定，覆盖自动判断
+        planTemplate = tpl;
+      }
     });
   }
   var planScaleBtns = document.querySelectorAll('#planScaleRow .tpl-btn');

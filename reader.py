@@ -27,6 +27,7 @@ import db
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("PORT", 8000))
+REPORTS_DIR = os.path.join(BASE_DIR, "quality_reports")
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 
@@ -75,6 +76,23 @@ def load_review_limit():
         return int(load_config().get("review_limit", 30) or 30)
     except (TypeError, ValueError):
         return 30
+
+
+def load_latest_report():
+    """读最新质量巡检报告 JSON；无报告返回 None。"""
+    if not os.path.isdir(REPORTS_DIR):
+        return None
+    try:
+        files = sorted(f for f in os.listdir(REPORTS_DIR) if f.endswith(".json"))
+    except OSError:
+        return None
+    if not files:
+        return None
+    try:
+        with open(os.path.join(REPORTS_DIR, files[-1]), "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
 
 
 GRADE_SYSTEM = """你是一位严格的评分老师，负责给学生的简答题打分。
@@ -188,7 +206,6 @@ def create_card(api_key, topic=None, url=None, template="t2_reading"):
         user_prompt = tpl["user"].format(topic=content)
     else:
         user_prompt = tpl["user"].format(source="用户创建", title=title, content=content, url=url or "")
-
     client = OpenAI(api_key=api_key, base_url=DEEPSEEK_BASE_URL, timeout=60)
     try:
         resp = client.chat.completions.create(
@@ -229,6 +246,7 @@ def create_card(api_key, topic=None, url=None, template="t2_reading"):
     if template == "t1_vocab":
         fix_vocab_terms(card)
 
+    card["_gen_input"] = content  # 供 badcase 重生成重建输入
     if not save_card(card):
         return {"error": "该卡片已存在"}
     return {"success": True, "card": card}
@@ -294,6 +312,41 @@ def disambiguate_topic(api_key, topic, template="t4_trivia"):
         return {"error": str(e)}
 
 
+def classify_topic(api_key, topic):
+    """AI 自动判断主题类型 + 方向歧义（一次调用，替代用户手动选类型）。
+    返回 {template, label, reason, has_ambiguity, interpretations} 或 {error}。"""
+    if not api_key:
+        return {"error": "未配置 API key"}
+    if not topic or len(topic.strip()) < 2:
+        return {"error": "主题过短"}
+    from prompts import CLASSIFY_SYSTEM, CLASSIFY_USER, TEMPLATE_META
+    client = OpenAI(api_key=api_key, base_url=DEEPSEEK_BASE_URL, timeout=60)
+    try:
+        resp = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {"role": "system", "content": CLASSIFY_SYSTEM},
+                {"role": "user", "content": CLASSIFY_USER.format(topic=topic)},
+            ],
+            temperature=0.2,
+            response_format={"type": "json_object"},
+        )
+        data = json.loads(resp.choices[0].message.content)
+    except Exception as e:
+        traceback.print_exc()
+        return {"error": str(e)}
+    template = (data.get("template") or "").strip()
+    if template not in TEMPLATE_META:
+        template = "t4_trivia"  # 非法值兜底
+    return {
+        "template": template,
+        "label": TEMPLATE_META[template]["label"],
+        "reason": data.get("reason", ""),
+        "has_ambiguity": bool(data.get("has_ambiguity")),
+        "interpretations": (data.get("interpretations") or [])[:3],
+    }
+
+
 def _group_size(template):
     """每组的卡数：词汇 10 词一组，其余 5 个一组。"""
     return 10 if template == "t1_vocab" else 5
@@ -332,12 +385,15 @@ def _generate_plan_cards(api_key, plan_id, outline, template, base_index, batch_
             continue
         if template == "t1_vocab":
             user_prompt = tpl["user"].format(input=point_title)  # 词汇卡：输入单词本身
+            gen_input = point_title
         elif template in ("t3_math", "t4_trivia", "t5_skill", "t6_code"):
             topic_input = point_title if not focus else f"{point_title}（{focus}）"
             user_prompt = tpl["user"].format(topic=topic_input)
+            gen_input = topic_input
         else:  # t2_reading
             topic_input = point_title if not focus else f"{point_title}（{focus}）"
             user_prompt = tpl["user"].format(source="学习计划", title=point_title, content=topic_input, url="")
+            gen_input = topic_input
         card = None
         for attempt in range(3):  # 质量门禁：最多重试 2 次
             try:
@@ -385,6 +441,7 @@ def _generate_plan_cards(api_key, plan_id, outline, template, base_index, batch_
         }
         if template == "t1_vocab":
             fix_vocab_terms(card)
+        card["_gen_input"] = gen_input  # 供 badcase 重生成重建输入
         if save_card(card):
             generated += 1
     return generated
@@ -402,6 +459,98 @@ def _generate_plan_async(api_key, plan_id, outline, template, total):
             db.save_plan(plan_update)
     except Exception:
         traceback.print_exc()
+
+
+def regen_card(api_key, source_url):
+    """badcase 一键重生成：按原 template/_gen_input 重新生成（走质量门禁），成功后删旧卡。
+    保留原 plan_id/plan_index/group_index/batch_index/plan_total，只换 source_url 去重（不脱离原计划）。
+    幂等：重生成期间在 extra 标记 _regen_at，重复请求直接拒绝。"""
+    if not api_key:
+        return {"error": "未配置 API key"}
+    if not source_url:
+        return {"error": "缺少 source_url"}
+    old = db.get_card(source_url)
+    if not old:
+        return {"error": "卡片不存在"}
+    if old.get("_regen_at"):
+        return {"error": "该卡正在重新生成中，请稍候"}
+    template = old.get("template") or (old.get("_meta") or {}).get("template") or "t2_reading"
+    gen_input = old.get("_gen_input") or old.get("title") or ""
+    if not gen_input:
+        return {"error": "该卡缺少生成输入，无法重生成"}
+
+    # 标记再生中（幂等防并发）
+    db.update_card_extra(source_url, "_regen_at", datetime.now().isoformat())
+
+    from prompts import TEMPLATES
+    tpl = TEMPLATES.get(template, TEMPLATES["t2_reading"])
+    client = OpenAI(api_key=api_key, base_url=DEEPSEEK_BASE_URL, timeout=60)
+    card = None
+    user_prompt = None
+    for attempt in range(3):  # 质量门禁：最多重试 2 次
+        try:
+            if template == "t1_vocab":
+                user_prompt = tpl["user"].format(input=gen_input)
+            elif template in ("t3_math", "t4_trivia", "t5_skill", "t6_code"):
+                user_prompt = tpl["user"].format(topic=gen_input)
+            else:
+                user_prompt = tpl["user"].format(
+                    source="学习计划", title=old.get("title") or gen_input,
+                    content=gen_input, url="")
+            resp = client.chat.completions.create(
+                model=tpl["model"],
+                messages=[
+                    {"role": "system", "content": tpl["system"]},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=tpl["temperature"],
+                response_format={"type": "json_object"},
+            )
+            card = json.loads(resp.choices[0].message.content)
+        except Exception as e:
+            traceback.print_exc()
+            card = None
+            break
+        if card.get("skip"):
+            break
+        ok, issues = _validate_card(card, template)
+        if ok:
+            break
+        if attempt < 2:
+            user_prompt += "\n注意：上次生成不符合要求（%s），请修正后重新输出完整 JSON。" % "；".join(issues)
+
+    if not card or card.get("skip"):
+        db.update_card_extra(source_url, "_regen_at", None)  # 取消标记，允许重试
+        return {"error": card.get("reason", "重生成失败") if card else "重生成失败"}
+
+    # 保留原计划归属字段，只换 source_url 去重
+    for k in ("plan_id", "plan_index", "plan_total", "group_index", "batch_index"):
+        if old.get(k) is not None:
+            card[k] = old.get(k)
+    card.setdefault("source", old.get("source") or "学习计划")
+    card["_meta"] = {
+        "generated_at": datetime.now().isoformat(),
+        "template": template,
+        "category": old.get("category") or {
+            "t1_vocab": "词汇", "t2_reading": "精读", "t3_math": "数学",
+            "t4_trivia": "通识", "t5_skill": "技能", "t6_code": "代码",
+        }.get(template, "计划"),
+    }
+    if template == "t1_vocab":
+        fix_vocab_terms(card)
+    card["_gen_input"] = gen_input
+    if not card.get("source_url"):
+        ts = int(time.time())
+        if old.get("plan_id"):
+            card["source_url"] = f"plan:{old['plan_id']}:{old.get('plan_index', 0)}:{ts}"
+        else:
+            card["source_url"] = f"custom:{ts}:{(old.get('title') or gen_input)[:40]}"
+
+    if not db.save_card(card):
+        db.update_card_extra(source_url, "_regen_at", None)
+        return {"error": "新卡入库失败（可能重复），请重试"}
+    db.delete_card(source_url)  # 删旧卡 + 旧完成记录
+    return {"success": True, "card": card}
 
 
 def create_plan(api_key, title, topic, outline, cards_per_day=3, template="t4_trivia", scale=None, pace=None):
@@ -598,6 +747,10 @@ class ReaderHandler(BaseHTTPRequestHandler):
             self._send_json(db.stats())
             return
 
+        if path == "/api/report/latest":
+            self._send_json({"report": load_latest_report()})
+            return
+
         self._serve_static(path)
 
     def do_POST(self):
@@ -679,6 +832,11 @@ class ReaderHandler(BaseHTTPRequestHandler):
             self._send_json(result)
             return
 
+        if path == "/api/plan/classify":
+            result = classify_topic(load_api_key(), req.get("topic", ""))
+            self._send_json(result)
+            return
+
         if path == "/api/plan/create":
             result = create_plan(
                 load_api_key(),
@@ -749,6 +907,11 @@ class ReaderHandler(BaseHTTPRequestHandler):
         if path == "/api/favorite":
             ok = db.toggle_favorite(req.get("source_url", ""), req.get("favorite", True))
             self._send_json({"success": ok})
+            return
+
+        if path == "/api/regen":
+            result = regen_card(load_api_key(), req.get("source_url", ""))
+            self._send_json(result)
             return
 
         self.send_error(404)

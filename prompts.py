@@ -504,3 +504,80 @@ DISAMBIGUATE_USER = """请判断下面的学习主题是否有多个合理方向
 1. has_ambiguity=true 时，interpretations 给 2-3 个方向；false 时给空数组。
 2. 有 AI/LLM 语境的方向时放第一个。
 """
+
+# ===== 主题类型自动识别（classify：一次调用判断「类型 + 方向歧义」，替代用户手动选类型）=====
+
+CLASSIFY_SYSTEM = """你是一位学习规划助手，服务对象是 AI 从业者。
+用户输入一个想学习的主题，请完成两件事：
+1. 判断这个主题最适合哪种卡片类型（template）。
+2. 判断主题是否存在多个合理学习方向（有歧义才需要，供用户确认）。
+
+类型判断规则：
+- 学一个词/术语/缩写 → t1_vocab（词汇）
+- 读文章/论文/概念/范式/框架 → t2_reading（精读）
+- 数学概念/公式/定理 → t3_math（数学）
+- 冷知识/通识/历史/现象 → t4_trivia（通识）
+- 技能/操作步骤/方法/工具用法 → t5_skill（技能）
+- 代码/算法/程序机制 → t6_code（代码/算法）
+
+铁律：
+1. 跨界主题（如「学习 Agent」）按主流学习意图判断一个主类型：学概念/范式→精读，学算法实现/代码机制→代码，学工具操作→技能，学单词/术语→词汇，以此类推。
+2. 尊重用户输入的自然含义，不要为了套 AI 语境而硬造方向（如「雅思核心词汇」应判为词汇，而非 AI 术语）。
+3. 只输出合法的 JSON，不要输出 JSON 以外的文字。
+"""
+
+CLASSIFY_USER = """请判断下面的学习主题。
+【主题】{topic}
+
+输出 JSON（字段名必须一致）：
+{{
+  "template": "t1_vocab 或 t2_reading 或 t3_math 或 t4_trivia 或 t5_skill 或 t6_code",
+  "label": "类型中文名：词汇/精读/数学/通识/技能/代码",
+  "reason": "判断依据，一句话",
+  "has_ambiguity": true 或 false,
+  "interpretations": [
+    {{"label": "方向1标题，10字以内", "description": "这个方向讲什么，20-40字"}},
+    {{"label": "方向2标题", "description": "另一个方向"}}
+  ]
+}}
+
+要求：
+1. has_ambiguity=true 时 interpretations 给 2-3 个方向；false 时给空数组。
+2. 有 AI/LLM 语境的方向时放第一个。
+3. template 必须是 6 个合法值之一。
+"""
+
+# ===== 质量巡检：AI 4 维度打分（daily_check.py 用）=====
+
+QUALITY_SCORE_SYSTEM = """你是一位严格的内容质量评审，负责审查 AI 生成的学习卡片。
+从 4 个维度打分（每维 1-5 分）：
+1. accuracy 准确性：事实、数据、概念是否准确无硬伤。
+2. relevance 相关性：内容是否紧扣标题/主题，有没有跑题、注水。
+3. depth 深度：是否有增量认知、洞见，而不是泛泛而谈。
+4. structure 结构：字段是否齐全、格式是否规范、是否适合碎片化学习。
+
+badcase 判定：任一维度 ≤2 分，或 4 维平均分 <3 分 → verdict="badcase"。
+
+铁律：
+1. 只输出合法的 JSON，不要输出 JSON 以外的文字。
+2. 打分要严格但公平：达到模板要求的卡片值得 4-5 分，只有明显硬伤或注水才判 badcase。
+"""
+
+QUALITY_SCORE_USER = """请审查下面这张学习卡片。
+【类型】{template_label}
+【标题】{title}
+【内容】
+{content}
+
+输出 JSON（字段名必须一致）：
+{{
+  "accuracy": 1到5的整数,
+  "relevance": 1到5的整数,
+  "depth": 1到5的整数,
+  "structure": 1到5的整数,
+  "score": 1到5的浮点数（4维度平均，保留1位小数）,
+  "verdict": "badcase 或 pass",
+  "issues": ["问题1，15字内", "问题2，15字内"],
+  "suggestion": "改进建议，30字内"
+}}
+"""

@@ -258,10 +258,29 @@ def mark_done(date, source_url):
                WHERE source_url = ? AND memory_state IS NULL AND plan_id IS NOT NULL""",
             (tomorrow, source_url),
         )
+        # 任务卡学完全部 → 计划标记完成（前端隐藏）
+        row = conn.execute("SELECT plan_id FROM cards WHERE source_url = ?", (source_url,)).fetchone()
+        if row and row["plan_id"]:
+            _maybe_complete_plan(conn, row["plan_id"])
         conn.commit()
         return True
     finally:
         conn.close()
+
+
+def _maybe_complete_plan(conn, plan_id):
+    """该计划所有卡都学过（progress 有记录）→ status='done'。"""
+    total = conn.execute("SELECT COUNT(*) FROM cards WHERE plan_id = ?", (plan_id,)).fetchone()[0]
+    if total <= 0:
+        return
+    done = conn.execute(
+        """SELECT COUNT(DISTINCT p.card_source_url) FROM progress p
+           JOIN cards c ON c.source_url = p.card_source_url
+           WHERE c.plan_id = ?""",
+        (plan_id,),
+    ).fetchone()[0]
+    if done >= total:
+        conn.execute("UPDATE plans SET status = 'done' WHERE id = ? AND status != 'done'", (plan_id,))
 
 
 def get_done_dates():
@@ -652,3 +671,154 @@ def stats():
         "mastered": mastered,
         "total_reviews": total_reviews,
     }
+
+
+# ===== 质量巡检 M1：daily_check.py / /api/regen / /api/report 用 =====
+
+def get_card(source_url):
+    """按 source_url 读单卡（含 extra 合并），找不到返回 None。"""
+    if not source_url:
+        return None
+    conn = _conn()
+    try:
+        row = conn.execute("SELECT * FROM cards WHERE source_url = ?", (source_url,)).fetchone()
+    finally:
+        conn.close()
+    return _row_to_card(row) if row else None
+
+
+def update_card_extra(source_url, key, value):
+    """更新卡片 extra JSON 中的某个字段（value=None 表示删除该字段）。返回是否成功。"""
+    if not source_url:
+        return False
+    conn = _conn()
+    try:
+        row = conn.execute("SELECT extra FROM cards WHERE source_url = ?", (source_url,)).fetchone()
+        if not row:
+            return False
+        extra = _load(row["extra"]) or {}
+        if value is None:
+            extra.pop(key, None)
+        else:
+            extra[key] = value
+        conn.execute(
+            "UPDATE cards SET extra = ? WHERE source_url = ?",
+            (_dump(extra) if extra else None, source_url),
+        )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def load_cards_since(dt_str):
+    """返回 generated_at >= dt_str 的卡（巡检候选用），按 id 倒序。"""
+    conn = _conn()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM cards WHERE generated_at IS NOT NULL AND generated_at >= ? ORDER BY id DESC",
+            (dt_str,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [_row_to_card(r) for r in rows]
+
+
+def find_duplicate(template, title, exclude_source_url=None):
+    """同模板同标题的卡是否已存在。返回重复卡的 source_url，无则 None。"""
+    if not title:
+        return None
+    conn = _conn()
+    try:
+        if exclude_source_url:
+            rows = conn.execute(
+                "SELECT source_url FROM cards WHERE template = ? AND title = ? AND source_url != ? LIMIT 1",
+                (template, title, exclude_source_url),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT source_url FROM cards WHERE template = ? AND title = ? LIMIT 1",
+                (template, title),
+            ).fetchall()
+    finally:
+        conn.close()
+    return rows[0]["source_url"] if rows else None
+
+
+def study_on_date(date):
+    """某日学习量：progress 表当日条数（含散卡+任务卡，统一口径）。"""
+    conn = _conn()
+    try:
+        row = conn.execute("SELECT COUNT(*) FROM progress WHERE date = ?", (date,)).fetchone()
+    finally:
+        conn.close()
+    return row[0] if row else 0
+
+
+def count_due_on_date(date):
+    """某日到期卡数：next_review_at == date 且未掌握（精确匹配口径）。"""
+    conn = _conn()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM cards WHERE next_review_at = ? AND (memory_state IS NULL OR memory_state != 'mastered')",
+            (date,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return row[0] if row else 0
+
+
+def reviewed_on_date(date):
+    """某日复习卡数（去重卡）。"""
+    conn = _conn()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(DISTINCT card_source_url) FROM reviews WHERE review_date = ?",
+            (date,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return row[0] if row else 0
+
+
+def review_accuracy_on_date(date):
+    """某日复习正确率：good 记录 / 总记录。返回 (比率, 总次数)，无记录返回 (None, 0)。"""
+    conn = _conn()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*), SUM(CASE WHEN result = 'good' THEN 1 ELSE 0 END) FROM reviews WHERE review_date = ?",
+            (date,),
+        ).fetchone()
+    finally:
+        conn.close()
+    total = row[0] if row else 0
+    good = row[1] or 0
+    return (round(good / total, 3) if total else None, total)
+
+
+def compliance_on_date(date):
+    """到期遵守度（口径：当日复习去重卡数 / 当日到期卡数）。到期 = next_review_at <= date 且未掌握。"""
+    conn = _conn()
+    try:
+        due = conn.execute(
+            "SELECT COUNT(*) FROM cards WHERE next_review_at <= ? AND (memory_state IS NULL OR memory_state != 'mastered')",
+            (date,),
+        ).fetchone()[0]
+        done = conn.execute(
+            "SELECT COUNT(DISTINCT card_source_url) FROM reviews WHERE review_date = ?",
+            (date,),
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    return (round(done / due, 3) if due else None, done, due)
+
+
+def mastery_rate():
+    """掌握率：mastered / 进入复习队列的卡总数。返回 (比率, 已掌握, 总数)。"""
+    conn = _conn()
+    try:
+        total = conn.execute("SELECT COUNT(*) FROM cards WHERE memory_state IS NOT NULL").fetchone()[0]
+        mastered = conn.execute("SELECT COUNT(*) FROM cards WHERE memory_state='mastered'").fetchone()[0]
+    finally:
+        conn.close()
+    return (round(mastered / total, 3) if total else None, mastered, total)
