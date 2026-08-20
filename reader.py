@@ -795,6 +795,14 @@ class ReaderHandler(BaseHTTPRequestHandler):
             self._send_json({"report": load_latest_report()})
             return
 
+        if path == "/api/notifications":
+            unread = (qs.get("unread") or ["0"])[0] in ("1", "true")
+            self._send_json({
+                "notifications": db.list_notifications(limit=50, unread_only=unread),
+                "unread_count": db.count_unread_notifications(),
+            })
+            return
+
         self._serve_static(path)
 
     def do_POST(self):
@@ -863,6 +871,12 @@ class ReaderHandler(BaseHTTPRequestHandler):
                 req.get("event", ""),
                 req.get("source_url", ""),
             )
+            self._send_json({"success": True})
+            return
+
+        if path == "/api/notifications/read":
+            ids = req.get("ids")
+            db.mark_notifications_read([int(i) for i in ids] if isinstance(ids, list) and ids else None)
             self._send_json({"success": True})
             return
 

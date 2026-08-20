@@ -69,6 +69,17 @@ CREATE TABLE IF NOT EXISTS events (
   event TEXT,
   source_url TEXT
 );
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  date TEXT,
+  type TEXT,
+  title TEXT,
+  body TEXT,
+  level TEXT DEFAULT 'info',
+  read INTEGER DEFAULT 0,
+  created_at TEXT
+);
 """
 
 
@@ -887,6 +898,69 @@ def restore_progress(date, source_url):
             "INSERT OR REPLACE INTO progress (date, card_source_url, done) VALUES (?, ?, 1)",
             (date, source_url),
         )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ===== M3 程序内通知（daily_agent 产出，前端铃铛/弹窗展示）=====
+
+def add_notification(n_type, title, body, level="info", date=None):
+    """写一条通知。返回通知 id。"""
+    now = datetime.now()
+    conn = _conn()
+    try:
+        cur = conn.execute(
+            "INSERT INTO notifications (date, type, title, body, level, read, created_at) VALUES (?, ?, ?, ?, ?, 0, ?)",
+            (date or now.strftime("%Y-%m-%d"), n_type, title, body, level, now.isoformat()),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def list_notifications(limit=50, unread_only=False):
+    """通知列表，倒序。unread_only=True 只返回未读。"""
+    conn = _conn()
+    try:
+        if unread_only:
+            rows = conn.execute(
+                "SELECT * FROM notifications WHERE read = 0 ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM notifications ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+    finally:
+        conn.close()
+    return [dict(r) for r in rows]
+
+
+def count_unread_notifications():
+    """未读通知数。"""
+    conn = _conn()
+    try:
+        row = conn.execute("SELECT COUNT(*) FROM notifications WHERE read = 0").fetchone()
+    finally:
+        conn.close()
+    return row[0] if row else 0
+
+
+def mark_notifications_read(ids=None):
+    """标记已读。ids=None 全部已读；否则只标指定的 id 列表。"""
+    conn = _conn()
+    try:
+        if ids:
+            placeholders = ",".join("?" for _ in ids)
+            conn.execute(
+                f"UPDATE notifications SET read = 1 WHERE id IN ({placeholders})",
+                ids,
+            )
+        else:
+            conn.execute("UPDATE notifications SET read = 1 WHERE read = 0")
         conn.commit()
     finally:
         conn.close()

@@ -499,6 +499,14 @@
   .qc-issue { font-size: 11px; background: rgba(190,86,47,.1); color: #be562f; border-radius: 999px; padding: 2px 8px; }
   .qc-regen { font-size: 12px; font-weight: 700; color: #fff; background: var(--primary); border: none; border-radius: 999px; padding: 6px 14px; cursor: pointer; }
   .qc-regen:disabled { opacity: .6; cursor: not-allowed; }
+
+  /* 通知中心（M3 程序内推送） */
+  .notif-item { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 8px; cursor: pointer; }
+  .notif-item.unread { border-left: 3px solid var(--accent); background: #fdfaf4; }
+  .notif-head { display: flex; justify-content: space-between; align-items: center; font-size: 13px; gap: 8px; }
+  .notif-head b { overflow-wrap: break-word; }
+  .notif-date { font-size: 11px; color: var(--text-3); flex-shrink: 0; }
+  .notif-body { font-size: 12px; color: var(--text-2); margin-top: 4px; line-height: 1.6; }
   .onboard-overlay { position: fixed; inset: 0; z-index: 110; background: rgba(43,43,40,.5); display: flex; align-items: center; justify-content: center; padding: 24px; }
   .onboard-box { width: 100%; max-width: 360px; background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 28px 24px; }
   .onboard-title { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
@@ -523,6 +531,7 @@
     <div class="stat-bar">
       <span class="stat-item">连击 <b id="streakNum">0</b> 天</span>
       <span class="stat-item">今日完成 <b id="todayDone">0</b> 张</span>
+      <button class="review-btn" id="notifBtn" style="display:none">🔔 <b id="notifCount">0</b></button>
       <button class="review-btn" id="qcBtn">📋 质检</button>
       <button class="review-btn" id="reviewBtn" style="display:none;margin-left:auto">待复习 <b id="reviewCount">0</b></button>
     </div>
@@ -578,6 +587,17 @@
       <div id="qcMetrics"></div>
       <div id="qcBadcases"></div>
       <button class="create-cancel" id="qcClose" style="margin-top:12px">关闭</button>
+    </div>
+  </div>
+
+  <!-- 通知中心弹层（M3 管家通知） -->
+  <div class="create-overlay" id="notifOverlay" style="display:none">
+    <div class="create-box" style="max-width:440px">
+      <div class="create-box-title">🔔 管家通知</div>
+      <div class="create-hint" id="notifHint"></div>
+      <div id="notifList"></div>
+      <button class="create-cancel" id="notifReadAll" style="margin-top:12px">全部标为已读</button>
+      <button class="create-cancel" id="notifClose" style="margin-top:6px">关闭</button>
     </div>
   </div>
 
@@ -2289,6 +2309,60 @@
     });
   }
 
+  // ---------- M3 管家通知（程序内推送） ----------
+  function openNotifCenter() {
+    $('notifOverlay').style.display = 'flex';
+    fetchJSON('/api/notifications').then(function (data) {
+      var list = data.notifications || [];
+      var unread = data.unread_count || 0;
+      $('notifHint').textContent = unread ? unread + ' 条未读，点未读项标记已读' : '没有未读通知';
+      if (!list.length) { $('notifList').innerHTML = '<div class="qc-none">暂无通知</div>'; return; }
+      $('notifList').innerHTML = list.map(function (n) {
+        var lv = n.level === 'action' ? ' style="color:var(--red)"' : (n.level === 'warn' ? ' style="color:var(--accent)"' : '');
+        return '<div class="notif-item' + (n.read ? '' : ' unread') + '" data-id="' + n.id + '">' +
+          '<div class="notif-head"><b' + lv + '>' + escapeHtml(n.title || '') + '</b><span class="notif-date">' + escapeHtml(n.date || '') + '</span></div>' +
+          '<div class="notif-body">' + escapeHtml(n.body || '') + '</div>' +
+        '</div>';
+      }).join('');
+      var items = $('notifList').querySelectorAll('.notif-item.unread');
+      for (var i = 0; i < items.length; i++) {
+        items[i].addEventListener('click', function () {
+          var id = parseInt(this.getAttribute('data-id'), 10);
+          var el = this;
+          postJSON('/api/notifications/read', { ids: [id] }).then(function () {
+            el.classList.remove('unread');
+            refreshNotifBadge();
+          }).catch(function () {});
+        });
+      }
+    }).catch(function () {});
+  }
+
+  function refreshNotifBadge() {
+    fetchJSON('/api/notifications?unread=1').then(function (data) {
+      var n = (data.notifications || []).length;
+      $('notifCount').textContent = n;
+      $('notifBtn').style.display = n ? 'inline-block' : 'none';
+    }).catch(function () {});
+  }
+
+  function maybePopNotif() {
+    // 有「新」通知才自动弹出（localStorage 记录已看过的最大 id，避免每次刷新都弹）
+    fetchJSON('/api/notifications?unread=1').then(function (data) {
+      var list = data.notifications || [];
+      var seen = 0;
+      try { seen = parseInt(localStorage.getItem('weizhi_notif_seen') || '0', 10); } catch (e) {}
+      var newest = 0;
+      for (var i = 0; i < list.length; i++) if (list[i].id > newest) newest = list[i].id;
+      if (list.length && newest > seen) {
+        openNotifCenter();
+        try { localStorage.setItem('weizhi_notif_seen', String(newest)); } catch (e) {}
+      }
+      $('notifCount').textContent = list.length;
+      $('notifBtn').style.display = list.length ? 'inline-block' : 'none';
+    }).catch(function () {});
+  }
+
   // ---------- 初始化 ----------
   $('backBtn').addEventListener('click', goBack);
   $('createBtn').addEventListener('click', openCreate);
@@ -2391,6 +2465,19 @@
   $('qcOverlay').addEventListener('click', function (e) {
     if (e.target === $('qcOverlay')) $('qcOverlay').style.display = 'none';
   });
+  $('notifBtn').addEventListener('click', openNotifCenter);
+  $('notifClose').addEventListener('click', function () { $('notifOverlay').style.display = 'none'; });
+  $('notifOverlay').addEventListener('click', function (e) {
+    if (e.target === $('notifOverlay')) $('notifOverlay').style.display = 'none';
+  });
+  $('notifReadAll').addEventListener('click', function () {
+    postJSON('/api/notifications/read', {}).then(function () {
+      var items = $('notifList').querySelectorAll('.notif-item');
+      for (var i = 0; i < items.length; i++) items[i].classList.remove('unread');
+      $('notifHint').textContent = '已全部读完';
+      refreshNotifBadge();
+    }).catch(function () {});
+  });
   var searchTimer = null;
   $('searchInput').addEventListener('input', function () {
     clearTimeout(searchTimer);
@@ -2479,6 +2566,7 @@
     loadPlans();
     loadReviewQueue();
     checkOnboarding();
+    maybePopNotif();
   }
 })();
 </script>
