@@ -19,3 +19,4 @@ __pycache__/
 
 # ===== 质量巡检产物（报告与备份不入库）=====
 quality_reports/
+backups/
