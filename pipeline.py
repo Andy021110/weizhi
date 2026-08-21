@@ -257,13 +257,14 @@ def main():
 
     total_generated = 0
     max_cards = int(config.get("daily_generate_limit", 15) or 15)
+    per_source = args.limit or 2   # 每源最多处理最新 2 篇：保证各源（含官方源）都能被覆盖，避免前面的源吃满额度
     for source in config.get("sources", []):
         if total_generated >= max_cards:
             print(f"\n⏹️  已达每日生成上限 {max_cards} 张，停止。")
             break
         print(f"\n📡 抓取源：{source['name']} ({source.get('category', '')})")
         try:
-            articles = fetch_rss(source, limit=args.limit)
+            articles = fetch_rss(source, limit=per_source)
         except Exception as e:
             print(f"  ❌ 抓取失败：{e}")
             continue

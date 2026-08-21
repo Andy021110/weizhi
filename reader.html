@@ -1203,12 +1203,18 @@
     window.scrollTo(0, 0);
   }
 
-  // 时效性：计算「发布于 X 个月前」与提示文案（trending=时效敏感，stable=经典稳定）
+  // 时效性：计算「发布于 X 个月前/前 N 天」与提示文案（stable=经典稳定，event 以天计）
   function monthsSince(d) {
     var p = new Date(d);
     if (isNaN(p.getTime())) return null;
     var now = new Date();
     return Math.max(0, (now.getFullYear() - p.getFullYear()) * 12 + (now.getMonth() - p.getMonth()));
+  }
+
+  function daysSince(d) {
+    var p = new Date(d);
+    if (isNaN(p.getTime())) return null;
+    return Math.max(0, Math.floor((Date.now() - p.getTime()) / 86400000));
   }
 
   function freshnessBadge(c) {
@@ -1227,9 +1233,10 @@
       return '<span class="badge badge-time">' + m + ' 个月前 · 较新</span>';
     }
     if (t === 'event') {
-      if (m === null) return '<span class="badge badge-time">时效内容 · 核对最新</span>';
-      if (m > 3) return '<span class="badge badge-time">发布于 ' + escapeHtml(pub) + ' · 可能过时</span>';
-      return '<span class="badge badge-time">发布于 ' + escapeHtml(pub) + ' · 时效</span>';
+      var d = daysSince(pub);
+      if (d === null) return '<span class="badge badge-time">时效内容 · 核对最新</span>';
+      if (d > 14) return '<span class="badge badge-time">发布于 ' + escapeHtml(pub) + ' · 可能已过时</span>';
+      return '<span class="badge badge-time">' + d + ' 天前 · 快讯</span>';
     }
     return '';
   }
@@ -1250,7 +1257,10 @@
     var m = monthsSince(c.published);
     var flag = '';
     if (t === 'fast' && m !== null && m > 6) flag = ' · 可能过时';
-    else if (t === 'event' && m !== null && m > 3) flag = ' · 可能过时';
+    else if (t === 'event') {
+      var d = daysSince(c.published);
+      if (d !== null && d > 14) flag = ' · 可能已过时';
+    }
     else if (t === 'evolving' && m !== null && m > 24) flag = ' · 演进中';
     return (c.source || '') + flag;
   }
