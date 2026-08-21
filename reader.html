@@ -1613,7 +1613,7 @@
           '<div class="task-card-actions">' +
             '<button class="edit-btn" data-pause="' + p.id + '">' + (isPaused ? '继续' : '暂停') + '</button>' +
             '<button class="edit-btn" data-continue="' + p.id + '">续学</button>' +
-            '<button class="edit-btn" data-complete="' + p.id + '" style="color:var(--primary)">完成</button>' +
+            '<button class="edit-btn" data-complete="' + p.id + '" style="color:var(--primary)">归档</button>' +
             '<button class="edit-btn" data-drop="' + p.id + '" style="color:var(--red)">放弃</button>' +
           '</div>' +
         '</div>';
@@ -1667,12 +1667,12 @@
         postJSON('/api/plan/delete', { id: id }).then(function () { loadPlans(); });
       });
     }
-    // 手动「完成」：学完（或想收尾）的任务标记完成，从任务列表隐藏（卡片保留在原计划）
+    // 手动「归档」：不再续学、收尾此计划（状态变为已完成，从任务列表隐藏；卡片保留）
     var completes = sec.querySelectorAll('[data-complete]');
     for (var cj = 0; cj < completes.length; cj++) {
       completes[cj].addEventListener('click', function () {
         var id = parseInt(this.getAttribute('data-complete'), 10);
-        if (!confirm('标记该任务为已完成？完成后从任务列表隐藏（卡片保留，可随时「统计」查看）。')) return;
+        if (!confirm('归档此计划？表示你不再续学、收尾结束（卡片保留，可随时在「统计」查看）。')) return;
         postJSON('/api/plan/update', { id: id, status: 'done' }).then(function () { loadPlans(); });
       });
     }
@@ -1687,7 +1687,7 @@
       var all = data.cards || [];
       var pending = all.filter(function (c) { return !isDone(c); });
       if (!pending.length) {
-        alert('这个任务全部学完啦！点「续学」生成下一批。');
+        alert('本批已全部学完！想继续就点「续学」生成下一批；不想继续了点「归档」收尾。');
         return;
       }
       // 按整组翻：取第一个有未学卡的 group_index，把整组都展示
