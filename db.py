@@ -763,6 +763,42 @@ def find_duplicate(template, title, exclude_source_url=None):
     return rows[0]["source_url"] if rows else None
 
 
+# ===== 抓取增强：标题归一化 + 跨源查重（资讯产品式去重）=====
+
+def norm_title(t):
+    """标题归一化：去标点/空白/小写，用于跨源比较。"""
+    import re
+    t = (t or "").lower()
+    return re.sub(r"[^\w\u4e00-\u9fff]+", "", t)
+
+
+def find_similar_title(title, exclude_source_url=None):
+    """跨源查重：归一化标题完全相等判重复；长度足够时包含关系也判重复（如
+    「量子纠缠」 vs 「量子纠缠：超越时空」）。返回已存在卡的 source_url，无则 None。
+    保守策略：短标题（<15 字符）只做完全匹配，避免误杀。"""
+    nt = norm_title(title)
+    if len(nt) < 4:
+        return None
+    conn = _conn()
+    try:
+        rows = conn.execute("SELECT source_url, title FROM cards WHERE title IS NOT NULL").fetchall()
+    finally:
+        conn.close()
+    for r in rows:
+        if r["source_url"] == exclude_source_url:
+            continue
+        n_old = norm_title(r["title"])
+        if not n_old:
+            continue
+        if n_old == nt:
+            return r["source_url"]
+        # 近似：双方都够长且一方包含另一方（长度差 10 以内），视为转载/变体
+        if len(nt) >= 15 and len(n_old) >= 15 and abs(len(nt) - len(n_old)) <= 10:
+            if n_old in nt or nt in n_old:
+                return r["source_url"]
+    return None
+
+
 def study_on_date(date):
     """某日学习量：progress 表当日条数（含散卡+任务卡，统一口径）。"""
     conn = _conn()

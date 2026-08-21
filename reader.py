@@ -706,8 +706,20 @@ def list_dates():
 
 
 def load_cards(date=None):
-    """读取卡片。date 为空则读全部；否则只读指定日期。返回列表（已按日期倒序）。"""
-    return db.load_cards(date)
+    """读取卡片。date 为空则读全部；否则只读指定日期。返回列表（已按日期倒序）。
+    全部视图额外按「发布时间新鲜度」排序（越新越好，无 published 的沉底）。"""
+    cards = db.load_cards(date)
+    if not date:
+        def sort_key(c):
+            pub = c.get("published")
+            if pub:
+                try:
+                    return (1, datetime.strptime(str(pub)[:10], "%Y-%m-%d").timestamp())
+                except (ValueError, TypeError):
+                    pass
+            return (0, 0)
+        cards.sort(key=sort_key, reverse=True)
+    return cards
 
 
 class ReaderHandler(BaseHTTPRequestHandler):

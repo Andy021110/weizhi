@@ -12,8 +12,10 @@
     python pipeline.py --template t3_math --input "贝叶斯定理"      # 按需生成数学卡
 """
 import argparse
+import hashlib
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime
@@ -211,6 +213,57 @@ def save_card(card):
     return db.save_card(card)
 
 
+# ===== 抓取增强：增量过滤（seen 集合） + 跨源查重（一手优先）=====
+
+PREFERRED_DOMAINS = ("arxiv.org", "openai.com", "anthropic.com",
+                     "deepmind.google", "huggingface.co", "github.com")
+
+
+def _title_fp(title):
+    """标题指纹：归一化后 md5 前 12 位，用于增量去重。"""
+    return hashlib.md5(db.norm_title(title).encode("utf-8")).hexdigest()[:12]
+
+
+def _seen_key(source_name):
+    return "seen_" + re.sub(r"[^a-zA-Z0-9]+", "_", source_name)
+
+
+def _load_seen(source_name):
+    raw = db.get_user_state(_seen_key(source_name))
+    try:
+        return json.loads(raw) if raw else []
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+def _save_seen(source_name, seen):
+    """保存已见指纹（保留最近 300 条，容量可控）。"""
+    db.set_user_state(_seen_key(source_name), json.dumps(seen[:300]))
+
+
+def _is_preferred(url):
+    """是否一手/官方域名（跨源重复时优先保留这些来源）。"""
+    m = re.search(r"https?://([^/]+)", url or "")
+    d = (m.group(1) if m else "").lower()
+    return any(d == p or d.endswith("." + p) for p in PREFERRED_DOMAINS)
+
+
+def filter_fresh(source, articles, dry=False):
+    """增量过滤：返回 (新增文章列表, 是否更新了 seen)。dry=True 时只算不保存（fetch-only 用）。"""
+    seen = _load_seen(source["name"])
+    fresh = []
+    new_fps = []
+    for a in articles:
+        fp = _title_fp(a.get("title") or "")
+        if not fp or fp in seen:
+            continue
+        fresh.append(a)
+        new_fps.append(fp)
+    if new_fps and not dry:
+        _save_seen(source["name"], new_fps + [f for f in seen if f not in new_fps])
+    return fresh
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--fetch-only", action="store_true", help="只抓取，不调 AI")
@@ -257,25 +310,41 @@ def main():
 
     total_generated = 0
     max_cards = int(config.get("daily_generate_limit", 15) or 15)
-    per_source = args.limit or 2   # 每源最多处理最新 2 篇：保证各源（含官方源）都能被覆盖，避免前面的源吃满额度
+    per_source = args.limit or 2   # 每源最多生成最新 2 篇（增量过滤后），保证各源都能被覆盖
     for source in config.get("sources", []):
         if total_generated >= max_cards:
             print(f"\n⏹️  已达每日生成上限 {max_cards} 张，停止。")
             break
         print(f"\n📡 抓取源：{source['name']} ({source.get('category', '')})")
         try:
-            articles = fetch_rss(source, limit=per_source)
+            articles = fetch_rss(source, limit=args.limit or 50)  # 拉足量再增量过滤
         except Exception as e:
             print(f"  ❌ 抓取失败：{e}")
             continue
 
         print(f"  抓到 {len(articles)} 篇")
-        for art in articles:
+        if args.fetch_only:
+            continue
+        # 增量过滤：只处理之前没见过的条目（避免 OpenAI 这类全历史源每次重拉）
+        articles = filter_fresh(source, articles, dry=False)
+        if not articles:
+            print("  无新增条目，跳过。")
+            continue
+        print(f"  新增 {len(articles)} 篇（增量过滤后取前 {per_source} 篇）")
+        for art in articles[:per_source]:
             if total_generated >= max_cards:
                 break
             print(f"  📄 {art['title'][:50]}")
-            if args.fetch_only:
-                continue
+            # 跨源查重：量子位转载 arXiv 论文这类，重复时一手域名优先替换旧卡，否则跳过
+            dup = db.find_similar_title(art["title"])
+            if dup:
+                old = db.get_card(dup)
+                if _is_preferred(art["url"]) and not _is_preferred((old or {}).get("source_url") or ""):
+                    print(f"    ↪️  与已有卡重复且本来源更权威（{dup[:36]}…），替换旧卡")
+                    db.delete_card(dup)
+                else:
+                    print(f"    ⏭️  跨源重复（已有 {dup[:36]}…），跳过")
+                    continue
             card = generate_card(client, source, art, "t2_reading")
             if card and save_card(card):
                 total_generated += 1
