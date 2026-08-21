@@ -125,11 +125,12 @@
   .cal-num { font-size: 9px; opacity: 0.75; margin-top: 1px; }
 
   /* 学习统计 */
-  .stat-bar { display: flex; gap: 14px; margin-bottom: 12px; }
+  .stat-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
   .stat-item {
     font-size: 12px; color: var(--text-2); font-weight: 600;
     background: var(--card); border: 1px solid var(--line);
     padding: 6px 12px; border-radius: 999px;
+    margin-right: auto; white-space: nowrap;
   }
   .stat-item b { color: var(--primary); font-size: 13px; margin: 0 1px; }
 
@@ -222,6 +223,7 @@
   .badge-diff-高级 { background: var(--red-soft); color: var(--red); }
   .badge-diff-其他 { background: var(--blue-soft); color: var(--blue); }
   .badge-time { background: var(--amber-soft); color: #9a6a1a; border: 1px dashed #d8b36a; }
+  .learned-badge { background: var(--green-soft); color: var(--primary-dark); border: 1px solid #cfe6d8; }
   .meta-source { font-size: 12px; color: var(--text-3); margin-left: auto; }
   .card-arrow { color: var(--text-3); font-size: 13px; margin-left: 2px; }
 
@@ -417,7 +419,10 @@
   .disambig-opt:hover { border-color: var(--primary); }
 
   /* 复习 */
-  .review-btn { border: none; border-radius: 999px; background: var(--red); color: #fff; font-size: 12px; font-weight: 700; padding: 6px 12px; cursor: pointer; }
+  .review-btn { border: none; border-radius: 999px; font-size: 12px; font-weight: 700; padding: 6px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+  .review-btn.danger { background: var(--red); color: #fff; }          /* 待复习：红实心 = 紧急 */
+  .review-btn.tint { background: transparent; border: 1px solid var(--accent); color: #b06a49; }   /* 通知：陶土描边 = 信息 */
+  .review-btn.tint-green { background: transparent; border: 1px solid var(--primary); color: var(--primary-dark); }  /* 质检：绿描边 = 系统状态 */
   .ic-svg { display: inline-flex; align-items: center; justify-content: center; vertical-align: -2px; }
   .ic-svg svg { width: 20px; height: 20px; }
   .review-btn .ic-svg svg { width: 14px; height: 14px; vertical-align: -2px; }
@@ -454,7 +459,7 @@
   .task-card-title { font-size: 15px; font-weight: 700; }
   .task-tpl { display: inline-block; font-size: 10px; font-weight: 700; color: #fff; background: var(--primary); border-radius: 4px; padding: 1px 5px; margin-right: 6px; vertical-align: 2px; }
   .task-card-progress { font-size: 12px; color: var(--text-3); margin-top: 3px; }
-  .task-card-actions { display: flex; flex-direction: column; gap: 1px; flex: 0 0 auto; }
+  .task-card-actions { display: flex; flex-direction: row; flex-wrap: wrap; gap: 2px; flex: 0 0 auto; justify-content: flex-end; max-width: 110px; }
   .task-card-actions .edit-btn { font-size: 11px; padding: 3px 6px; }
 
   /* 任务翻卡视图 */
@@ -469,6 +474,7 @@
   .task-nav-btn { flex: 1; border: none; border-radius: var(--radius-sm); background: var(--primary); color: #fff; font-size: 14px; font-weight: 700; padding: 13px; cursor: pointer; }
   .task-nav-btn.ghost { background: transparent; border: 1px solid var(--line); color: var(--text-2); }
   .task-nav-btn:disabled { opacity: .4; cursor: default; }
+  .detail-nav { display: flex; gap: 10px; margin-top: 14px; }
 
   /* 搜索 / 收藏 / 统计 */
   .search-box { margin-bottom: 12px; }
@@ -534,14 +540,14 @@
       <button class="back-btn" id="backBtn" style="display:none" aria-label="返回">‹</button>
     </div>
     <div class="stat-bar">
-      <span class="stat-item">连击 <b id="streakNum">0</b> 天</span>
-      <span class="stat-item">今日完成 <b id="todayDone">0</b> 张</span>
-      <button class="review-btn" id="notifBtn" style="display:none"><span class="ic-svg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 9a6 6 0 1 0-12 0c0 4.5-2 5.8-2 5.8h16s-2-1.3-2-5.8z"/><path d="M10 19a2.2 2.2 0 0 0 4 0"/></svg></span> <b id="notifCount">0</b></button>
-      <button class="review-btn" id="qcBtn"><span class="ic-svg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 2.8V11c0 4.6-3.1 7.6-7 9-3.9-1.4-7-4.4-7-9V5.8L12 3z"/><path d="M9 12l2.2 2.2L15.5 9.5"/></svg></span> 质检</button>
-      <button class="review-btn" id="reviewBtn" style="display:none;margin-left:auto">待复习 <b id="reviewCount">0</b></button>
+      <span class="stat-item">今日 <b id="todayDone">0</b> 张 · 连击 <b id="streakNum">0</b> 天</span>
+      <button class="review-btn tint" id="notifBtn" style="display:none"><span class="ic-svg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 9a6 6 0 1 0-12 0c0 4.5-2 5.8-2 5.8h16s-2-1.3-2-5.8z"/><path d="M10 19a2.2 2.2 0 0 0 4 0"/></svg></span> <b id="notifCount">0</b></button>
+      <button class="review-btn tint-green" id="qcBtn"><span class="ic-svg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 2.8V11c0 4.6-3.1 7.6-7 9-3.9-1.4-7-4.4-7-9V5.8L12 3z"/><path d="M9 12l2.2 2.2L15.5 9.5"/></svg></span> 质检</button>
+      <button class="review-btn danger" id="reviewBtn" style="display:none">待复习 <b id="reviewCount">0</b></button>
     </div>
-    <div class="search-box">
-      <input type="text" id="searchInput" placeholder="搜索卡片（标题 / 正文）...">
+    <div class="search-box" style="position:relative">
+      <input type="text" id="searchInput" placeholder="搜索卡片（标题 / 正文）..." style="padding-right:34px">
+      <button id="searchClear" style="display:none;position:absolute;right:12px;top:50%;transform:translateY(-50%);border:none;background:transparent;color:var(--text-3);font-size:15px;cursor:pointer;padding:4px" aria-label="清空搜索">✕</button>
     </div>
     <div class="date-scroll" id="dateScroll"></div>
   </header>
@@ -610,7 +616,7 @@
   <div class="onboard-overlay" id="onboardOverlay" style="display:none">
     <div class="onboard-box">
       <div class="onboard-title">欢迎使用微知</div>
-      <div class="onboard-sub">每天碎片时间学一点：AI 抓取生成卡片、系统学习计划、间隔复习巩固记忆。<br><br>想系统学一个主题，可以「建计划」；想随便看看，直接进入。</div>
+      <div class="onboard-sub">你的 AI 学习管家：每天自动抓取前沿内容、生成学习卡片、为你挑出值得读的 Top 3、间隔复习巩固记忆，内容质量还会自动巡检修复。<br><br>想系统学一个主题，可以「建计划」；想随便看看，直接进入。</div>
       <button class="create-submit" id="onboardPlan" style="background:var(--accent)">建个学习计划</button>
       <button class="create-submit" id="onboardStart">随便看看</button>
     </div>
@@ -721,6 +727,7 @@
     currentDate: null,
     cards: [],
     view: 'list',
+    subView: null,   // 'stats' | 'fav'：统计/收藏子视图（需要返回按钮）
     detailIndex: null,
     quiz: { started: false, index: 0, score: 0, done: false, answered: false }
   };
@@ -1090,6 +1097,7 @@
       '<button class="cal-nav" type="button" data-cal-nav="-1">‹</button>' +
       '<div class="cal-month">' + y + ' 年 ' + mo + ' 月</div>' +
       '<button class="cal-nav" type="button" data-cal-nav="1">›</button>' +
+      '<button class="cal-nav" type="button" id="calTodayBtn" style="margin-left:auto;width:auto;padding:0 10px">今天</button>' +
       '</div>';
     html += '<div class="cal-weekdays">' +
       '<span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span>' +
@@ -1134,6 +1142,9 @@
         renderCalendar();
       });
     }
+    // 事件：「今天」快捷回到今日
+    var todayBtn = panel.querySelector('#calTodayBtn');
+    if (todayBtn) todayBtn.addEventListener('click', function () { selectDate(todayStr()); });
     // 事件：选日期
     var days = panel.querySelectorAll('.cal-day[data-date]');
     for (var i = 0; i < days.length; i++) {
@@ -1193,6 +1204,7 @@
 
   function goBack() {
     state.view = 'list';
+    state.subView = null;
     resetQuiz();
     renderView();
     renderList();
@@ -1201,7 +1213,7 @@
   function renderView() {
     $('listView').classList.toggle('active', state.view === 'list');
     $('detailView').classList.toggle('active', state.view === 'detail');
-    $('backBtn').style.display = state.view === 'detail' ? 'flex' : 'none';
+    $('backBtn').style.display = (state.view === 'detail' || state.subView) ? 'flex' : 'none';
     window.scrollTo(0, 0);
   }
 
@@ -1280,6 +1292,7 @@
       '<div class="detail-title">' + escapeHtml(c.title) + '</div>' +
       '<div class="detail-summary">' + escapeHtml(c.summary) + '</div>' +
       '<div class="detail-meta">' +
+        (isDone(c) ? '<span class="badge learned-badge">✓ 已学完</span>' : '') +
         '<span class="badge badge-cat">' + escapeHtml(cat) + '</span>' +
         '<span class="badge ' + difficultyClass(diff) + '">' + escapeHtml(diff) + '</span>' +
         planBadge +
@@ -1324,10 +1337,18 @@
       '</div></div>';
     }
 
-    // 兜底：既无测验也无简答题时，提供「标记已读」按钮，保证每张卡都可完成
-    if (!quiz.length && !c.open_question) {
-      html += '<div class="section"><div class="section-title">完成阅读</div>' +
-        '<button class="quiz-toggle" id="markDoneBtn" style="background:var(--accent)">✓ 标记已读</button></div>';
+    // 「标记学完」：读完即可完成（不强制做题），已读的卡不显示
+    if (!isDone(c)) {
+      html += '<div class="section" style="padding:14px"><button class="quiz-toggle" id="markDoneBtn" style="background:var(--accent);box-shadow:none">✓ 标记学完</button></div>';
+    }
+
+    // 上一张/下一张导航（列表上下文）
+    if (state.cards && state.cards.length > 1) {
+      var ci = state.detailIndex;
+      html += '<div class="detail-nav">' +
+        '<button class="task-nav-btn ghost" id="prevCardBtn"' + (ci > 0 ? '' : ' disabled') + '>‹ 上一张</button>' +
+        '<button class="task-nav-btn ghost" id="nextCardBtn"' + (ci < state.cards.length - 1 ? '' : ' disabled') + '>下一张 ›</button>' +
+      '</div>';
     }
 
     $('detailView').innerHTML = html;
@@ -1338,10 +1359,21 @@
     var mdBtn = $('markDoneBtn');
     if (mdBtn) mdBtn.addEventListener('click', function () {
       markComplete(c);
-      mdBtn.textContent = '✓ 已读';
+      mdBtn.textContent = '✓ 已学完';
       mdBtn.style.opacity = '.65';
       mdBtn.disabled = true;
+      var meta = $('detailView').querySelector('.detail-meta');
+      if (meta && !meta.querySelector('.learned-badge')) {
+        var b = document.createElement('span');
+        b.className = 'badge learned-badge';
+        b.textContent = '✓ 已学完';
+        meta.insertBefore(b, meta.firstChild);
+      }
     });
+    var prevBtn = $('prevCardBtn');
+    if (prevBtn && !prevBtn.disabled) prevBtn.addEventListener('click', function () { openDetail(ci - 1); });
+    var nextBtn = $('nextCardBtn');
+    if (nextBtn && !nextBtn.disabled) nextBtn.addEventListener('click', function () { openDetail(ci + 1); });
     var editBtn = $('editBtn');
     if (editBtn) editBtn.addEventListener('click', openEdit);
     var favBtn = $('favBtnCard');
@@ -2257,6 +2289,8 @@
   }
 
   function showFavorites() {
+    state.subView = 'fav';
+    $('backBtn').style.display = 'flex';
     fetchJSON('/api/favorites').then(function (data) {
       state.cards = data.cards || [];
       state.currentDate = null;
@@ -2266,6 +2300,8 @@
   }
 
   function showStats() {
+    state.subView = 'stats';
+    $('backBtn').style.display = 'flex';
     fetchJSON('/api/stats').then(function (data) {
       var html = '<div class="section"><div class="section-title">学习统计</div><div class="stat-grid">' +
         '<div class="stat-cell"><div class="stat-cell-num">' + (data.total_cards || 0) + '</div><div class="stat-cell-label">总卡片</div></div>' +
@@ -2604,7 +2640,14 @@
   $('searchInput').addEventListener('input', function () {
     clearTimeout(searchTimer);
     var q = this.value;
+    $('searchClear').style.display = q ? 'inline-block' : 'none';
     searchTimer = setTimeout(function () { doSearch(q); }, 400);
+  });
+  $('searchClear').addEventListener('click', function () {
+    $('searchInput').value = '';
+    $('searchClear').style.display = 'none';
+    state.subView = null;
+    loadDates().then(loadCards);
   });
   var tplBtns = document.querySelectorAll('#templateRow .tpl-btn');
   for (var t = 0; t < tplBtns.length; t++) {
