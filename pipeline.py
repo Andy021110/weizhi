@@ -18,6 +18,8 @@ import os
 import re
 import sys
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime
 
 import feedparser
@@ -44,19 +46,55 @@ def load_config():
 
 
 def fetch_rss(source, limit=None):
-    """抓取一个 RSS 源，返回文章列表 [{title, url, summary}]。"""
-    feed = feedparser.parse(source["rss"])
-    entries = feed.entries
-    if limit:
-        entries = entries[:limit]
-    articles = []
-    for e in entries:
-        articles.append({
-            "title": getattr(e, "title", "").strip(),
-            "url": getattr(e, "link", "").strip(),
-            "summary": getattr(e, "summary", "") or getattr(e, "description", ""),
-        })
-    return articles
+    """抓取一个 RSS 源，返回文章列表 [{title, url, summary}]。
+    B1 条件请求：带 ETag/Last-Modified，304 直接返回空（未更新）。
+    B2 容错：失败重试 3 次，指数退避（0.5s/2s/8s）。"""
+    key = re.sub(r"[^a-zA-Z0-9]+", "_", source["name"])
+    headers = {"User-Agent": "Mozilla/5.0 (WeiZhiReader/1.0)"}
+    etag = db.get_user_state("etag_" + key)
+    lm = db.get_user_state("lm_" + key)
+    if etag:
+        headers["If-None-Match"] = etag
+    if lm:
+        headers["If-Modified-Since"] = lm
+
+    last_err = None
+    for attempt in range(3):
+        try:
+            req = urllib.request.Request(source["rss"], headers=headers)
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                code = resp.getcode()
+                if code == 304:
+                    return []  # 源未更新，跳过
+                new_etag = resp.headers.get("ETag")
+                new_lm = resp.headers.get("Last-Modified")
+                content = resp.read()
+            if new_etag:
+                db.set_user_state("etag_" + key, new_etag)
+            if new_lm:
+                db.set_user_state("lm_" + key, new_lm)
+            feed = feedparser.parse(content)
+            entries = feed.entries
+            if limit:
+                entries = entries[:limit]
+            articles = []
+            for e in entries:
+                articles.append({
+                    "title": getattr(e, "title", "").strip(),
+                    "url": getattr(e, "link", "").strip(),
+                    "summary": getattr(e, "summary", "") or getattr(e, "description", ""),
+                })
+            return articles
+        except urllib.error.HTTPError as e:
+            if e.code == 304:
+                return []  # 未更新
+            last_err = e
+        except Exception as e:
+            last_err = e
+        if attempt < 2:
+            time.sleep(0.5 * (2 ** attempt))
+    print(f"  ⚠️ 抓取失败（重试 3 次）：{source['name']} - {last_err}")
+    raise last_err if last_err else RuntimeError("fetch failed")
 
 
 def extract_full_text(url):
@@ -224,21 +262,29 @@ def _title_fp(title):
     return hashlib.md5(db.norm_title(title).encode("utf-8")).hexdigest()[:12]
 
 
-def _seen_key(source_name):
-    return "seen_" + re.sub(r"[^a-zA-Z0-9]+", "_", source_name)
+def _article_sim(a):
+    """文章内容指纹（SimHash）：只算摘要主体（标题常被转载改写，摘要一般保留）。
+    摘要为空时退化为标题指纹。"""
+    s = (a.get("summary") or "").strip()
+    if len(s) >= 20:
+        return db._simhash(s[:200])
+    return db._simhash(a.get("title") or "")
 
 
-def _load_seen(source_name):
-    raw = db.get_user_state(_seen_key(source_name))
+GLOBAL_SEEN_KEY = "seen_global"  # 全局已处理指纹（不分源），跨源转载在文章层拦截
+
+
+def _load_seen():
+    raw = db.get_user_state(GLOBAL_SEEN_KEY)
     try:
         return json.loads(raw) if raw else []
     except (json.JSONDecodeError, TypeError):
         return []
 
 
-def _save_seen(source_name, seen):
-    """保存已见指纹（保留最近 300 条，容量可控）。"""
-    db.set_user_state(_seen_key(source_name), json.dumps(seen[:300]))
+def _save_seen(seen):
+    """保存全局已见指纹（保留最近 300 条，容量可控）。每项 {t: 标题指纹, s: 内容指纹}。"""
+    db.set_user_state(GLOBAL_SEEN_KEY, json.dumps(seen[:300]))
 
 
 def _is_preferred(url):
@@ -248,19 +294,31 @@ def _is_preferred(url):
     return any(d == p or d.endswith("." + p) for p in PREFERRED_DOMAINS)
 
 
-def filter_fresh(source, articles, dry=False):
-    """增量过滤：返回 (新增文章列表, 是否更新了 seen)。dry=True 时只算不保存（fetch-only 用）。"""
-    seen = _load_seen(source["name"])
+def filter_fresh(articles, dry=False):
+    """全局增量 + 跨源内容去重：返回新增文章列表。
+    - 标题指纹已见 → 跳过（增量）
+    - 内容指纹（SimHash）与已见汉明距离 ≤3 → 跳过（跨源转载，保留先到的源）
+    dry=True 时只算不保存（fetch-only 用）。"""
+    seen = _load_seen()
     fresh = []
-    new_fps = []
+    new_items = []
     for a in articles:
         fp = _title_fp(a.get("title") or "")
-        if not fp or fp in seen:
+        sim = _article_sim(a)
+        dup = False
+        for item in seen:
+            if fp and item.get("t") == fp:
+                dup = True
+                break
+            if sim and item.get("s") and db._hamming(sim, item["s"]) <= 3:
+                dup = True
+                break
+        if dup or not fp:
             continue
         fresh.append(a)
-        new_fps.append(fp)
-    if new_fps and not dry:
-        _save_seen(source["name"], new_fps + [f for f in seen if f not in new_fps])
+        new_items.append({"t": fp, "s": sim})
+    if new_items and not dry:
+        _save_seen(new_items + [i for i in seen if i not in new_items])
     return fresh
 
 
@@ -325,8 +383,8 @@ def main():
         print(f"  抓到 {len(articles)} 篇")
         if args.fetch_only:
             continue
-        # 增量过滤：只处理之前没见过的条目（避免 OpenAI 这类全历史源每次重拉）
-        articles = filter_fresh(source, articles, dry=False)
+        # 全局增量 + 跨源内容去重：只处理没见过的（SimHash 识别改写转载）
+        articles = filter_fresh(articles, dry=False)
         if not articles:
             print("  无新增条目，跳过。")
             continue
@@ -335,8 +393,8 @@ def main():
             if total_generated >= max_cards:
                 break
             print(f"  📄 {art['title'][:50]}")
-            # 跨源查重：量子位转载 arXiv 论文这类，重复时一手域名优先替换旧卡，否则跳过
-            dup = db.find_similar_title(art["title"])
+            # 跨源查重（B3 含 SimHash 内容指纹）：重复时一手域名优先替换旧卡，否则跳过
+            dup = db.find_similar_title(art["title"], summary=art.get("summary", ""))
             if dup:
                 old = db.get_card(dup)
                 if _is_preferred(art["url"]) and not _is_preferred((old or {}).get("source_url") or ""):

@@ -705,19 +705,62 @@ def list_dates():
     return db.list_dates()
 
 
+# ===== A3 推荐排序：新鲜度 × 源权威 × 兴趣（已读沉底）=====
+
+CRED_WEIGHT = {
+    "官方": 1.2,
+    "权威媒体": 1.0,
+    "专业机构": 1.0,
+    "专业博客": 0.9,
+    "自媒体": 0.7,
+}
+
+
+def _freshness_score(c):
+    """时效分（0-1）：event 2 周内满分、fast 半年内高分、evolving 2 年内中等，stable 稳定分。"""
+    t = c.get("timeliness")
+    if t == "trending":
+        t = "evolving"
+    days = None
+    pub = c.get("published")
+    if pub:
+        try:
+            days = (datetime.now() - datetime.strptime(str(pub)[:10], "%Y-%m-%d")).days
+        except ValueError:
+            days = None
+    if t == "event":
+        return 1.0 if (days is not None and days <= 14) else 0.2
+    if t == "fast":
+        return 0.9 if (days is not None and days <= 180) else 0.3
+    if t == "evolving":
+        return 0.8 if (days is not None and days <= 730) else 0.4
+    if t == "stable":
+        return 0.6
+    return 0.4  # 无时效标注
+
+
+def _authority_score(c):
+    """权威权重：从 credibility 映射（策略文档 A/B/C/D 级）。"""
+    cred = c.get("credibility") or ""
+    for k, w in CRED_WEIGHT.items():
+        if k in cred:
+            return w
+    return 0.8
+
+
 def load_cards(date=None):
-    """读取卡片。date 为空则读全部；否则只读指定日期。返回列表（已按日期倒序）。
-    全部视图额外按「发布时间新鲜度」排序（越新越好，无 published 的沉底）。"""
+    """读取卡片。date 为空则读全部；否则只读指定日期。
+    全部视图按「推荐分」排序：新鲜度 × 源权威 × (1+兴趣/10)，已读卡沉底（×0.3）。"""
     cards = db.load_cards(date)
     if not date:
+        done = set()
+        for urls in db.get_done_dates().values():
+            done.update(urls)
         def sort_key(c):
-            pub = c.get("published")
-            if pub:
-                try:
-                    return (1, datetime.strptime(str(pub)[:10], "%Y-%m-%d").timestamp())
-                except (ValueError, TypeError):
-                    pass
-            return (0, 0)
+            base = _freshness_score(c) * _authority_score(c) * (1 + db.card_interest(c.get("source_url")) / 10.0)
+            if c.get("source_url") in done:
+                base *= 0.3  # 已读沉底，让「今天读什么」优先
+            return base
         cards.sort(key=sort_key, reverse=True)
     return cards
 

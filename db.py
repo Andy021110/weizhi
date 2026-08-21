@@ -772,16 +772,41 @@ def norm_title(t):
     return re.sub(r"[^\w\u4e00-\u9fff]+", "", t)
 
 
-def find_similar_title(title, exclude_source_url=None):
-    """跨源查重：归一化标题完全相等判重复；长度足够时包含关系也判重复（如
-    「量子纠缠」 vs 「量子纠缠：超越时空」）。返回已存在卡的 source_url，无则 None。
-    保守策略：短标题（<15 字符）只做完全匹配，避免误杀。"""
+def _simhash(text, bits=64):
+    """简化 SimHash：按 2-gram 切分加权成 64 位指纹。用于识别「标题被改写」的跨源转载。"""
+    import hashlib
+    import re as _re
+    t = _re.sub(r"\s+", "", (text or "").lower())
+    if len(t) < 8:
+        return 0
+    grams = [t[i:i + 2] for i in range(len(t) - 1)]
+    v = [0] * bits
+    for g in grams:
+        h = int(hashlib.md5(g.encode("utf-8")).hexdigest()[:16], 16)
+        for i in range(bits):
+            v[i] += 1 if (h >> i) & 1 else -1
+    fp = 0
+    for i in range(bits):
+        if v[i] > 0:
+            fp |= (1 << i)
+    return fp
+
+
+def _hamming(a, b):
+    return bin(a ^ b).count("1")
+
+
+def find_similar_title(title, summary="", exclude_source_url=None):
+    """跨源查重（资讯产品式两级）：
+    1) 归一化标题完全匹配；2) 标题足够长时包含关系；3) SimHash 内容指纹（标题+摘要）汉明距离 ≤3。
+    返回已存在卡的 source_url，无则 None。短标题只做完全匹配，避免误杀。"""
     nt = norm_title(title)
     if len(nt) < 4:
         return None
+    fp_new = _simhash(title + " " + (summary or "")[:200]) if summary else None
     conn = _conn()
     try:
-        rows = conn.execute("SELECT source_url, title FROM cards WHERE title IS NOT NULL").fetchall()
+        rows = conn.execute("SELECT source_url, title, summary FROM cards WHERE title IS NOT NULL").fetchall()
     finally:
         conn.close()
     for r in rows:
@@ -792,9 +817,13 @@ def find_similar_title(title, exclude_source_url=None):
             continue
         if n_old == nt:
             return r["source_url"]
-        # 近似：双方都够长且一方包含另一方（长度差 10 以内），视为转载/变体
         if len(nt) >= 15 and len(n_old) >= 15 and abs(len(nt) - len(n_old)) <= 10:
             if n_old in nt or nt in n_old:
+                return r["source_url"]
+        # SimHash：标题被改写但内容相同也能认出
+        if fp_new:
+            fp_old = _simhash((r["title"] or "") + " " + (r["summary"] or "")[:200])
+            if fp_old and _hamming(fp_new, fp_old) <= 3:
                 return r["source_url"]
     return None
 
@@ -906,6 +935,24 @@ def events_on_date(date):
     finally:
         conn.close()
     return {r["event"]: r["n"] for r in rows}
+
+
+def card_interest(source_url):
+    """卡片兴趣分（A2/A3 推荐用）：点开×2 + 看思考题×1 + 提交简答×2。
+    返回 0-10 截断的分值；无记录返回 0。"""
+    if not source_url:
+        return 0
+    weights = {"card_open": 2, "think_open": 1, "open_submit": 2}
+    conn = _conn()
+    try:
+        rows = conn.execute(
+            "SELECT event, COUNT(*) AS n FROM events WHERE source_url = ? GROUP BY event",
+            (source_url,),
+        ).fetchall()
+    finally:
+        conn.close()
+    score = sum(weights.get(r["event"], 0) * r["n"] for r in rows)
+    return min(score, 10)
 
 
 # ===== M3 自动修复：备份 / 回滚辅助 =====

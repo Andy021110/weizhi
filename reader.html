@@ -1186,6 +1186,8 @@
     state.detailIndex = index;
     state.view = 'detail';
     resetQuiz();
+    var c = state.cards[index];
+    if (c) track('card_open', cardId(c));   // A2 兴趣信号：点开卡片
     renderDetail();
   }
 
