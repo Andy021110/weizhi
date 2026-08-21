@@ -1213,15 +1213,24 @@
 
   function freshnessBadge(c) {
     var t = c.timeliness;
+    if (t === 'trending') t = 'evolving';   // 兼容旧版两档值
     var pub = c.published;
-    if (t === 'trending') {
-      var m = monthsSince(pub);
-      if (m === null) return '<span class="badge badge-time">时效内容 · 建议核对最新</span>';
-      if (m <= 1) return '<span class="badge badge-time">近期内容</span>';
-      if (m < 12) return '<span class="badge badge-time">' + m + ' 个月前 · 关注最新</span>';
-      return '<span class="badge badge-time">发布于 ' + escapeHtml(pub) + ' · 可能过时</span>';
-    }
+    var m = monthsSince(pub);
     if (t === 'stable') return '<span class="badge badge-time">经典内容 · 长期有效</span>';
+    if (t === 'evolving') {
+      if (m !== null && m > 24) return '<span class="badge badge-time">' + m + ' 个月前 · 可能演进</span>';
+      return '';
+    }
+    if (t === 'fast') {
+      if (m === null) return '<span class="badge badge-time">时效内容 · 核对最新</span>';
+      if (m > 6) return '<span class="badge badge-time">' + m + ' 个月前 · 可能过时</span>';
+      return '<span class="badge badge-time">' + m + ' 个月前 · 较新</span>';
+    }
+    if (t === 'event') {
+      if (m === null) return '<span class="badge badge-time">时效内容 · 核对最新</span>';
+      if (m > 3) return '<span class="badge badge-time">发布于 ' + escapeHtml(pub) + ' · 可能过时</span>';
+      return '<span class="badge badge-time">发布于 ' + escapeHtml(pub) + ' · 时效</span>';
+    }
     return '';
   }
 
@@ -1236,13 +1245,14 @@
   }
 
   function listSource(c) {
-    // 列表卡紧凑显示：来源 + 时效提示
-    if (c.timeliness === 'trending') {
-      var m = monthsSince(c.published);
-      if (m !== null) return (c.source || '') + ' · ' + (m <= 1 ? '近期' : m + ' 个月前');
-      return (c.source || '') + ' · 时效';
-    }
-    return c.source || '';
+    // 列表卡紧凑显示：来源 + 过时信号（四档，兼容旧 trending）
+    var t = c.timeliness === 'trending' ? 'evolving' : c.timeliness;
+    var m = monthsSince(c.published);
+    var flag = '';
+    if (t === 'fast' && m !== null && m > 6) flag = ' · 可能过时';
+    else if (t === 'event' && m !== null && m > 3) flag = ' · 可能过时';
+    else if (t === 'evolving' && m !== null && m > 24) flag = ' · 演进中';
+    return (c.source || '') + flag;
   }
 
   function renderDetail() {

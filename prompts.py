@@ -61,14 +61,14 @@ T2_USER = """请把下面这篇《{source}》的文章加工成精读卡片。
   "published": "原文发布时间，格式 YYYY-MM-DD；无法确定填 null",
   "author": "作者或机构名；未知填 null",
   "credibility": "来源权威度，从：官方|权威媒体|专业机构|专业博客|自媒体 中选一个",
-  "timeliness": "时效类型：stable(经典/稳定内容) 或 trending(时效敏感内容，如 AI 前沿、产品动态、工具用法)",
+  "timeliness": "时效类型四档，按内容讲原理还是讲状态判断：stable(稳定，经典/教科书/定理/原理) / evolving(演进，方法论/最佳实践/设计范式) / fast(快变，模型/工具版本/API用法/性能数据) / event(时点，新闻/事件/热点解读)",
   "source": "{source}",
   "source_url": "{url}"
 }}
 
 quiz 至少 3 题。review_quiz 给 3 题（事实/观点判断，考记忆，与 quiz 的「理解题」角度不同）。answer 是正确选项的索引（0=A, 1=B, 2=C, 3=D）。
 open_question 是必填的简答题，grading_points 给 2-3 个可量化的评分要点。
-published 尽量从原文推断（正文/标题/链接里的日期），实在无法确定才填 null。AI/前沿类文章 timeliness 填 trending（这类内容变化快，用户需要知道时效性）。
+published 尽量从原文推断（正文/标题/链接里的日期），实在无法确定才填 null。讲原理的（如 Attention 机制）→ stable/evolving；讲最新状态/版本的（如某模型性能、某工具用法）→ fast/event。
 """
 
 # ===== T1 词汇卡（按需生成，输入英文单词或词库描述）=====
@@ -175,7 +175,7 @@ T3_USER = """请为下面的数学概念/问题生成一张数学卡。
   "published": null,
   "author": null,
   "credibility": "内容依据的权威度，从：教科书/权威|学术论文|专业机构|科普自媒体 中选一个",
-  "timeliness": "时效类型：stable(经典定理/教科书内容) 或 trending(该领域新进展/新方法)",
+  "timeliness": "时效类型四档：stable(经典定理/教科书内容) / evolving(该领域演进的方法论) / fast(新方法/新工具的具体状态与用法) / event(新进展新闻)；讲原理偏 stable，讲最新状态偏 fast/event",
   "open_question": {{
     "question": "一个开放简答题，要求用自己的话解释这个概念或它的用途，30-60字",
     "reference_answer": "参考答案，含关键要点，100-180字",
@@ -240,7 +240,7 @@ T4_USER = """请为下面的冷知识/趣闻/通识主题生成一张通识卡�
   "published": null,
   "author": null,
   "credibility": "内容依据的权威度，从：权威媒体|科普机构|书籍|自媒体 中选一个",
-  "timeliness": "时效类型：stable(经典通识/历史/成熟科学) 或 trending(近期事件/最新研究/热点现象)",
+  "timeliness": "时效类型四档：stable(经典通识/历史/成熟科学) / evolving(领域演进的认知) / fast(近期研究的具体结论/最新数据) / event(热点事件/新闻)",
   "source": "trivia"
 }}
 
@@ -300,7 +300,7 @@ T5_USER = """请为下面的实用技能/工具/效率技巧生成一张技能�
   "published": null,
   "author": null,
   "credibility": "方法依据的权威度，从：官方文档|专业实践|社区共识|自媒体 中选一个",
-  "timeliness": "时效类型：stable(经典方法论/通用技巧) 或 trending(工具用法/软件操作/行业热点，会随版本或趋势变化)",
+  "timeliness": "时效类型四档：stable(经典方法论/通用技巧) / evolving(实践方法论的演进) / fast(工具/软件操作，随版本变化) / event(行业热点事件)",
   "open_question": {{
     "question": "一个开放简答题，要求设计一个应用这个技能的具体场景，30-60字",
     "reference_answer": "参考答案，含关键要点，100-180字",
@@ -364,7 +364,7 @@ T6_USER = """请为下面的算法/代码模块生成一张「代码理解卡」
   "published": null,
   "author": null,
   "credibility": "内容依据的权威度，从：官方文档|论文|教科书|工程实践 中选一个",
-  "timeliness": "时效类型：stable(算法思想/经典机制，长期有效) 或 trending(框架API用法/最新实现/前沿架构，会随版本变化)",
+  "timeliness": "时效类型四档：stable(算法思想/经典机制，长期有效) / evolving(设计范式的演进) / fast(框架API用法/最新实现，随版本变化) / event(前沿发布/新闻)",
   "open_question": {{
     "question": "开放简答题：用自己的话讲这个算法/模块是怎么工作的，30-60字",
     "reference_answer": "参考答案，含关键要点，100-180字",
