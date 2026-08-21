@@ -221,6 +221,7 @@
   .badge-diff-中级 { background: var(--amber-soft); color: var(--amber); }
   .badge-diff-高级 { background: var(--red-soft); color: var(--red); }
   .badge-diff-其他 { background: var(--blue-soft); color: var(--blue); }
+  .badge-time { background: var(--amber-soft); color: #9a6a1a; border: 1px dashed #d8b36a; }
   .meta-source { font-size: 12px; color: var(--text-3); margin-left: auto; }
   .card-arrow { color: var(--text-3); font-size: 13px; margin-left: 2px; }
 
@@ -417,6 +418,9 @@
 
   /* 复习 */
   .review-btn { border: none; border-radius: 999px; background: var(--red); color: #fff; font-size: 12px; font-weight: 700; padding: 6px 12px; cursor: pointer; }
+  .ic-svg { display: inline-flex; align-items: center; justify-content: center; vertical-align: -2px; }
+  .ic-svg svg { width: 20px; height: 20px; }
+  .review-btn .ic-svg svg { width: 14px; height: 14px; vertical-align: -2px; }
   .review-overlay { position: fixed; inset: 0; z-index: 80; background: var(--bg); display: flex; flex-direction: column; }
   .review-head { padding: 16px 18px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; }
   .review-title { font-size: 16px; font-weight: 700; }
@@ -444,7 +448,8 @@
   .task-card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px; margin-bottom: 10px; cursor: pointer; display: flex; align-items: center; gap: 12px; border: 1px solid transparent; transition: border-color .2s, transform .1s; }
   .task-card:active { border-color: var(--primary); transform: scale(.99); }
   .task-card.paused { opacity: .62; }
-  .task-card-icon { width: 42px; height: 42px; border-radius: 12px; background: var(--green-soft); display: flex; align-items: center; justify-content: center; font-size: 21px; flex: 0 0 42px; }
+  .task-card-icon { width: 42px; height: 42px; border-radius: 12px; background: var(--green-soft); display: flex; align-items: center; justify-content: center; flex: 0 0 42px; }
+  .task-card-icon svg { width: 22px; height: 22px; color: var(--accent); }
   .task-card-body { flex: 1; min-width: 0; }
   .task-card-title { font-size: 15px; font-weight: 700; }
   .task-tpl { display: inline-block; font-size: 10px; font-weight: 700; color: #fff; background: var(--primary); border-radius: 4px; padding: 1px 5px; margin-right: 6px; vertical-align: 2px; }
@@ -531,8 +536,8 @@
     <div class="stat-bar">
       <span class="stat-item">连击 <b id="streakNum">0</b> 天</span>
       <span class="stat-item">今日完成 <b id="todayDone">0</b> 张</span>
-      <button class="review-btn" id="notifBtn" style="display:none">🔔 <b id="notifCount">0</b></button>
-      <button class="review-btn" id="qcBtn">📋 质检</button>
+      <button class="review-btn" id="notifBtn" style="display:none"><span class="ic-svg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 9a6 6 0 1 0-12 0c0 4.5-2 5.8-2 5.8h16s-2-1.3-2-5.8z"/><path d="M10 19a2.2 2.2 0 0 0 4 0"/></svg></span> <b id="notifCount">0</b></button>
+      <button class="review-btn" id="qcBtn"><span class="ic-svg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 2.8V11c0 4.6-3.1 7.6-7 9-3.9-1.4-7-4.4-7-9V5.8L12 3z"/><path d="M9 12l2.2 2.2L15.5 9.5"/></svg></span> 质检</button>
       <button class="review-btn" id="reviewBtn" style="display:none;margin-left:auto">待复习 <b id="reviewCount">0</b></button>
     </div>
     <div class="search-box">
@@ -582,7 +587,7 @@
   <!-- 质检报告弹层 -->
   <div class="create-overlay" id="qcOverlay" style="display:none">
     <div class="create-box" style="max-width:520px">
-      <div class="create-box-title">📋 质量巡检</div>
+      <div class="create-box-title">质量巡检</div>
       <div class="create-hint" id="qcMeta"></div>
       <div id="qcMetrics"></div>
       <div id="qcBadcases"></div>
@@ -593,7 +598,7 @@
   <!-- 通知中心弹层（M3 管家通知） -->
   <div class="create-overlay" id="notifOverlay" style="display:none">
     <div class="create-box" style="max-width:440px">
-      <div class="create-box-title">🔔 管家通知</div>
+      <div class="create-box-title">管家通知</div>
       <div class="create-hint" id="notifHint"></div>
       <div id="notifList"></div>
       <button class="create-cancel" id="notifReadAll" style="margin-top:12px">全部标为已读</button>
@@ -617,7 +622,7 @@
       <div class="create-box-title">系统学习计划</div>
       <div class="create-hint">AI 自动判断类型，或手动指定 + 输入主题</div>
       <div class="template-row" id="planTemplateRow">
-        <button class="tpl-btn active" data-tpl="__auto__">✨ 自动</button>
+        <button class="tpl-btn active" data-tpl="__auto__">AI 自动</button>
         <button class="tpl-btn" data-tpl="t4_trivia">通识</button>
         <button class="tpl-btn" data-tpl="t1_vocab">词汇</button>
         <button class="tpl-btn" data-tpl="t2_reading">精读</button>
@@ -721,6 +726,23 @@
   };
 
   var $ = function (id) { return document.getElementById(id); };
+
+  // ---------- 线性图标库（替换 emoji，贴合设计系统：细线/圆角/currentColor） ----------
+  var ICONS = {
+    vocab: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5.5C10.3 4.3 7.9 4 5 4v14.5c2.9 0 5.3.3 7 1.5 1.7-1.2 4.1-1.5 7-1.5V4c-2.9 0-5.3.3-7 1.5z"/><path d="M12 5.5v14.5"/></svg>',
+    reading: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 9.5h8M8 13h5M8 16.5h7"/></svg>',
+    math: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16.5c2.6 0 3.6-8.5 6.5-8.5s3.9 8.5 6.5 8.5"/><path d="M4 16.5h16" opacity=".4"/></svg>',
+    trivia: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 18h5M10.5 21h3"/><path d="M12 3a6 6 0 0 0-3.8 10.6c.8.7 1 1.3 1 2.4h5.6c0-1.1.2-1.7 1-2.4A6 6 0 0 0 12 3z"/></svg>',
+    skill: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>',
+    code: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 7L4 12l4.5 5M15.5 7L20 12l-4.5 5"/></svg>',
+    bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 9a6 6 0 1 0-12 0c0 4.5-2 5.8-2 5.8h16s-2-1.3-2-5.8z"/><path d="M10 19a2.2 2.2 0 0 0 4 0"/></svg>',
+    shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 2.8V11c0 4.6-3.1 7.6-7 9-3.9-1.4-7-4.4-7-9V5.8L12 3z"/><path d="M9 12l2.2 2.2L15.5 9.5"/></svg>',
+    review: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 12a8.5 8.5 0 1 1-2.5-6"/><path d="M20.5 3.5V7h-3.5"/></svg>',
+    calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5.5" width="16" height="15" rx="2"/><path d="M8 3.5v4M16 3.5v4M4 10.5h16"/></svg>',
+    link: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14a4 4 0 0 0 5.8 0l3.1-3.1a4 4 0 0 0-5.7-5.7L11.9 6.5"/><path d="M14 10a4 4 0 0 0-5.8 0L5.1 13.1a4 4 0 0 0 5.7 5.7l1.3-1.3"/></svg>',
+    pen: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l1.2-4.5L16.5 4.2a2 2 0 0 1 2.8 2.8L8 18.3 4 20z"/><path d="M14.5 6.2l3.3 3.3"/></svg>'
+  };
+  function iconSvg(name) { return '<span class="ic-svg">' + (ICONS[name] || '') + '</span>'; }
 
   // ---------- 访问 token（无感鉴权） ----------
   var TOKEN_KEY = 'weizhi_token';
@@ -991,7 +1013,7 @@
     if (c.think_question) {
       html += '<div class="section"><div class="section-title">想一想</div>' +
         '<div class="think-box"><span class="think-label">思考题</span>' + escapeHtml(c.think_question) + '</div>' +
-        (c.think_answer ? '<button class="think-answer-btn" type="button">💡 看 AI 回答</button>' +
+        (c.think_answer ? '<button class="think-answer-btn" type="button">看 AI 回答</button>' +
           '<div class="think-answer" style="display:none">' + escapeHtml(c.think_answer) + '</div>' : '') +
         '</div>';
     }
@@ -1041,7 +1063,7 @@
     var el = $('dateScroll');
     // 首次创建「入口按钮 + 弹出面板」结构（默认收起）
     if (!document.getElementById('dateTrigger')) {
-      el.innerHTML = '<div class="date-trigger" id="dateTrigger">📅 <span id="dateTriggerText"></span></div>' +
+      el.innerHTML = '<div class="date-trigger" id="dateTrigger">' + iconSvg('calendar') + '<span id="dateTriggerText"></span></div>' +
         '<div class="cal-panel" id="calPanel" style="display:none"></div>';
       $('dateTrigger').addEventListener('click', function () {
         var panel = $('calPanel');
@@ -1146,7 +1168,7 @@
           '<span class="badge badge-cat">' + escapeHtml(cat) + '</span>' +
           '<span class="badge ' + difficultyClass(diff) + '">' + escapeHtml(diff) + '</span>' +
           doneBadge +
-          '<span class="meta-source">' + escapeHtml(c.source || '') + '</span>' +
+          '<span class="meta-source">' + escapeHtml(listSource(c)) + '</span>' +
           '<span class="card-arrow">›</span>' +
         '</div>' +
       '</div>';
@@ -1181,6 +1203,48 @@
     window.scrollTo(0, 0);
   }
 
+  // 时效性：计算「发布于 X 个月前」与提示文案（trending=时效敏感，stable=经典稳定）
+  function monthsSince(d) {
+    var p = new Date(d);
+    if (isNaN(p.getTime())) return null;
+    var now = new Date();
+    return Math.max(0, (now.getFullYear() - p.getFullYear()) * 12 + (now.getMonth() - p.getMonth()));
+  }
+
+  function freshnessBadge(c) {
+    var t = c.timeliness;
+    var pub = c.published;
+    if (t === 'trending') {
+      var m = monthsSince(pub);
+      if (m === null) return '<span class="badge badge-time">时效内容 · 建议核对最新</span>';
+      if (m <= 1) return '<span class="badge badge-time">近期内容</span>';
+      if (m < 12) return '<span class="badge badge-time">' + m + ' 个月前 · 关注最新</span>';
+      return '<span class="badge badge-time">发布于 ' + escapeHtml(pub) + ' · 可能过时</span>';
+    }
+    if (t === 'stable') return '<span class="badge badge-time">经典内容 · 长期有效</span>';
+    return '';
+  }
+
+  function sourceMeta(c) {
+    // 来源 · 发布时间 · 权威度（无字段自动跳过）
+    var parts = [];
+    if (c.source) parts.push(c.source);
+    if (c.published) parts.push(c.published);
+    if (c.author) parts.push(c.author);
+    if (c.credibility) parts.push(c.credibility);
+    return parts.join(' · ');
+  }
+
+  function listSource(c) {
+    // 列表卡紧凑显示：来源 + 时效提示
+    if (c.timeliness === 'trending') {
+      var m = monthsSince(c.published);
+      if (m !== null) return (c.source || '') + ' · ' + (m <= 1 ? '近期' : m + ' 个月前');
+      return (c.source || '') + ' · 时效';
+    }
+    return c.source || '';
+  }
+
   function renderDetail() {
     var c = state.cards[state.detailIndex];
     if (!c) { goBack(); return; }
@@ -1197,6 +1261,7 @@
         '<span class="badge badge-cat">' + escapeHtml(cat) + '</span>' +
         '<span class="badge ' + difficultyClass(diff) + '">' + escapeHtml(diff) + '</span>' +
         planBadge +
+        freshnessBadge(c) +
         '<span class="badge badge-diff-其他">' + escapeHtml(fmtDate(c._date)) + '</span>' +
         '<button class="edit-btn" id="editBtn">编辑</button>' +
         '<button class="fav-btn' + (c.favorite ? ' active' : '') + '" id="favBtnCard">' + (c.favorite ? '★ 已收藏' : '☆ 收藏') + '</button>' +
@@ -1212,18 +1277,18 @@
     if (c.source || realUrl) {
       html += '<div class="section"><div class="section-title">信源</div><div class="links">';
       if (c.source) {
-        html += '<div class="link-item"><span class="ic">📰</span><span>' + escapeHtml(c.source) + '</span></div>';
+        html += '<div class="link-item"><span class="ic">' + iconSvg('link') + '</span><span>' + escapeHtml(sourceMeta(c) || c.source) + '</span></div>';
       }
       if (realUrl) {
         html += '<a class="link-item" href="' + escapeHtml(c.source_url) + '" target="_blank" rel="noopener">' +
-          '<span class="ic">🔗</span><span>原文链接</span><span class="url">' + escapeHtml(c.source_url) + '</span><span class="arrow-out">↗</span></a>';
+          '<span class="ic">' + iconSvg('link') + '</span><span>原文链接</span><span class="url">' + escapeHtml(c.source_url) + '</span><span class="arrow-out">↗</span></a>';
       }
       html += '</div></div>';
     }
 
     // Quiz
     if (quiz.length) {
-      html += '<button class="quiz-toggle" id="quizToggle">✏️ 做测验（' + quiz.length + ' 题）</button>';
+      html += '<button class="quiz-toggle" id="quizToggle">做测验（' + quiz.length + ' 题）</button>';
       html += '<div class="quiz-panel" id="quizPanel"></div>';
     }
 
@@ -1503,7 +1568,7 @@
     var shown = plans.filter(function (p) { return p.status !== 'done'; });
     if (!shown.length) { sec.style.display = 'none'; return; }
     sec.style.display = 'block';
-    var iconMap = { 't1_vocab': '📖', 't2_reading': '📰', 't3_math': '🔢', 't4_trivia': '💡', 't5_skill': '🛠', 't6_code': '💻' };
+    var iconMap = { 't1_vocab': ICONS.vocab, 't2_reading': ICONS.reading, 't3_math': ICONS.math, 't4_trivia': ICONS.trivia, 't5_skill': ICONS.skill, 't6_code': ICONS.code };
     var tplLabel = { 't1_vocab': '词汇', 't2_reading': '精读', 't3_math': '数学', 't4_trivia': '通识', 't5_skill': '技能', 't6_code': '代码' };
     sec.innerHTML = '<div class="plan-section-title">我的任务</div>' +
       shown.map(function (p) {
@@ -1517,7 +1582,7 @@
         var batchInfo = (p.batch && p.batch > 1) ? ' · 第 ' + p.batch + ' 批' : '';
         var sub = isGenerating ? ('⏳ 生成中 ' + done + ' / ' + total + '...') : (isPaused ? '已暂停' : (done + ' / ' + total + ' 已学 · 已完成 ' + doneGroups + ' 组'));
         return '<div class="task-card' + (isPaused ? ' paused' : '') + '" data-plan="' + p.id + '">' +
-          '<div class="task-card-icon">' + (iconMap[p.template] || '📚') + '</div>' +
+          '<div class="task-card-icon">' + (iconMap[p.template] || ICONS.reading) + '</div>' +
           '<div class="task-card-body">' +
             '<div class="task-card-title">' + (tplLabel[p.template] ? '<span class="task-tpl">' + tplLabel[p.template] + '</span>' : '') + escapeHtml(p.title || p.topic) + batchInfo + '</div>' +
             '<div class="task-card-progress">' + sub + '</div>' +
@@ -2217,7 +2282,7 @@
     var list = r.badcases || [];
     var box = $('qcBadcases');
     if (!list.length) {
-      box.innerHTML = '<div class="qc-none">✅ 今日未发现 badcase</div>';
+      box.innerHTML = '<div class="qc-none">今日未发现 badcase</div>';
     } else {
       box.innerHTML = '<div class="qc-badcase-title">发现 ' + list.length + ' 个 badcase：</div>' +
         list.map(function (b, i) {
@@ -2241,7 +2306,7 @@
     var acts = r.auto_actions || [];
     var okActs = acts.filter(function (a) { return a.success; });
     if (okActs.length) {
-      var actHtml = '<div class="qc-badcase-title">🤖 已自动修复 ' + okActs.length + ' 张（不满意可回滚）：</div>' +
+      var actHtml = '<div class="qc-badcase-title">已自动修复 ' + okActs.length + ' 张（不满意可回滚）：</div>' +
         okActs.map(function (a, i) {
           return '<div class="qc-badcase">' +
             '<div class="qc-badcase-head"><b>' + (i + 1) + '. ' + escapeHtml(a.title || '(无标题)') + '</b>' +
@@ -2271,7 +2336,7 @@
     btn.textContent = '回滚中...';
     postJSON('/api/rollback', { source_url: sourceUrl }).then(function (r) { return r.json(); }).then(function (data) {
       if (data.success) {
-        btn.textContent = '✅ 已回滚';
+        btn.textContent = '✓ 已回滚';
         setTimeout(function () { btn.textContent = '↩ 回滚'; btn.disabled = false; }, 2000);
         loadDates().then(loadCards);
         loadPlans();
@@ -2293,7 +2358,7 @@
     btn.textContent = '生成中...';
     postJSON('/api/regen', { source_url: sourceUrl }).then(function (r) { return r.json(); }).then(function (data) {
       if (data.success) {
-        btn.textContent = '✅ 已重新生成';
+        btn.textContent = '✓ 已重新生成';
         setTimeout(function () { btn.textContent = '重新生成'; btn.disabled = false; }, 2000);
         loadDates().then(loadCards);
         loadPlans();
@@ -2398,7 +2463,7 @@
       var ans = thinkBtn.nextElementSibling;
       if (ans && ans.classList.contains('think-answer')) {
         if (ans.style.display === 'none') { ans.style.display = 'block'; thinkBtn.textContent = '收起 AI 回答'; track('think_open'); }
-        else { ans.style.display = 'none'; thinkBtn.textContent = '💡 看 AI 回答'; }
+        else { ans.style.display = 'none'; thinkBtn.textContent = '看 AI 回答'; }
       }
       return;
     }

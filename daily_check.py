@@ -97,6 +97,14 @@ def rule_check(card):
     if db.find_duplicate(template, card.get("title"), exclude_source_url=card.get("source_url")):
         issues.append(("重复卡", "同模板同标题已存在"))
 
+    # 时效性：时效敏感卡必须标注权威度；有真实原文来源的还须标注发布时间（topic 模式无原文不强制）
+    if card.get("timeliness") == "trending":
+        has_real_src = bool(card.get("source_url") and str(card.get("source_url")).startswith("http"))
+        if has_real_src and not card.get("published"):
+            issues.append(("缺发布时间", "时效敏感内容未标注发布时间"))
+        if not card.get("credibility"):
+            issues.append(("缺权威度", "时效敏感内容未标注来源权威度"))
+
     for f in ("quiz", "review_quiz"):
         v = card.get(f)
         if v is not None and not isinstance(v, list):
