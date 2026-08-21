@@ -750,14 +750,22 @@ def _authority_score(c):
 
 def load_cards(date=None):
     """读取卡片。date 为空则读全部；否则只读指定日期。
-    全部视图按「推荐分」排序：新鲜度 × 源权威 × (1+兴趣/10)，已读卡沉底（×0.3）。"""
+    全部视图按「推荐分」排序：新鲜度 × 源权威 × (1+兴趣/10) × 画像主题加成，已读卡沉底（×0.3）。"""
     cards = db.load_cards(date)
     if not date:
         done = set()
         for urls in db.get_done_dates().values():
             done.update(urls)
+        topics = (db.get_profile().get("topics") or [])  # 画像兴趣主题
+        def interest_boost(c):
+            if not topics:
+                return 1.0
+            text = ((c.get("title") or "") + " " + (c.get("summary") or "")).lower()
+            hits = sum(1 for t in topics if t in text)
+            return 1.0 + min(hits, 3) * 0.15  # 命中画像主题最多 +45%
         def sort_key(c):
             base = _freshness_score(c) * _authority_score(c) * (1 + db.card_interest(c.get("source_url")) / 10.0)
+            base *= interest_boost(c)
             if c.get("source_url") in done:
                 base *= 0.3  # 已读沉底，让「今天读什么」优先
             return base
@@ -856,6 +864,10 @@ class ReaderHandler(BaseHTTPRequestHandler):
                 "notifications": db.list_notifications(limit=50, unread_only=unread),
                 "unread_count": db.count_unread_notifications(),
             })
+            return
+
+        if path == "/api/profile":
+            self._send_json({"profile": db.get_profile()})
             return
 
         self._serve_static(path)

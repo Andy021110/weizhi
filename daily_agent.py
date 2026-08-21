@@ -195,14 +195,17 @@ def rule_signals(report, y_report):
         "streak": {"days": streak, "last_active": last_active, "broken": streak_broken},
         "study": {"today": study_today, "yesterday": study_y, "decline": decline},
         "stale": stale,
+        "weak": db.weak_cards(limit=5),  # 学习画像：薄弱卡
+        "profile": {k: db.get_profile().get(k) for k in ("topics", "accuracy")},
     }
 
 
 def today_picks():
     """今日新卡候选（荐食用）：今天入库的卡，含推荐所需字段。
-    C1 关注主题：config 的 interested_topics 命中的卡排前面（荐食优先匹配）。"""
+    排序：命中「关注主题 + 学习画像兴趣主题」的排前面（荐食优先匹配）。"""
     cfg = load_config()
     topics = [t for t in (cfg.get("interested_topics") or []) if t]
+    topics += [t for t in (db.get_profile().get("topics") or []) if t]
     cards = db.load_cards(datetime.now().strftime("%Y-%m-%d"))
     out = []
     for c in cards:
@@ -413,6 +416,13 @@ def execute(api_key, decision, signals, backup_dir, dry_run=False):
             "stale_warn", "%d 张卡可能过时" % len(stale),
             "最早：「%s」（发布于 %s），建议重看或清理。" % ((oldest.get("title") or "")[:18], oldest.get("published")),
             level="warn")
+    # 7. 薄弱卡提醒（画像）：复习记错 ≥2 次的未掌握卡，≥2 张时提醒优先复习
+    weak = signals.get("weak") or []
+    if len(weak) >= 2:
+        names = "、".join((w.get("title") or "")[:12] for w in weak[:3])
+        db.add_notification(
+            "weak_review", "%d 张薄弱卡待巩固" % len(weak),
+            names + "（记错 ≥2 次）。建议优先复习，必要时降低难度重看。", level="warn")
     return results
 
 
@@ -447,6 +457,10 @@ def main():
         decision["regen_candidates"] = []
     results = execute(api_key, decision, signals, BACKUP_DIR)
 
+    # 学习周报（周日）：画像 + 本周学习复盘
+    if datetime.now().weekday() == 6 and not args.dry_run and not args.no_regen:
+        weekly_report()
+
     print("== 管家决策 ==")
     print("summary:", decision.get("summary"))
     for n in decision.get("notifications") or []:
@@ -454,6 +468,31 @@ def main():
     for r in results:
         print("修复:", r.get("success"), "|", (r.get("title") or r.get("source_url") or "")[:30],
               "|", r.get("reason") or "")
+
+
+def weekly_report():
+    """周日学习周报（画像驱动）：本周学习量、复习准确率、薄弱点、兴趣主题。"""
+    import sqlite3 as _sq
+    today = datetime.now()
+    week_ago = (today - timedelta(days=7)).strftime("%Y-%m-%d")
+    conn2 = _sq.connect(os.path.join(BASE_DIR, "weizhi.db"), timeout=30)
+    try:
+        study_n = conn2.execute(
+            "SELECT COUNT(*) FROM progress WHERE date >= ?", (week_ago,)
+        ).fetchone()[0]
+    finally:
+        conn2.close()
+    prof = db.get_profile()
+    accuracy = prof.get("accuracy")
+    weak = prof.get("weak") or []
+    topics = prof.get("topics") or []
+    body = "本周学习 %d 张；复习准确率 %s；%s。%s" % (
+        study_n,
+        ("%.0f%%" % (accuracy * 100)) if accuracy is not None else "-",
+        ("兴趣主题：" + "、".join(topics[:4])) if topics else "兴趣主题待积累",
+        ("薄弱卡 %d 张，建议优先巩固" % len(weak)) if len(weak) else "无薄弱卡，状态良好",
+    )
+    db.add_notification("weekly_report", "本周学习周报", body, level="info")
 
 
 if __name__ == "__main__":

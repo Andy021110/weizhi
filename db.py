@@ -955,6 +955,116 @@ def card_interest(source_url):
     return min(score, 10)
 
 
+# ===== 学习画像（Duolingo/Anki 式：兴趣主题 + 薄弱点 + 准确率）=====
+
+PROFILE_KEYWORDS = [
+    "agent", "llm", "大模型", "rag", "transformer", "注意力", "推理", "多模态",
+    "训练", "微调", "对齐", "幻觉", "记忆", "上下文", "产品", "数据", "算法",
+    "评估", "评测", "部署", "安全", "工具", "工作流", "提示词", "embedding",
+    "moe", "蒸馏", "强化学习", "智能体", "检索", "生成", "diffusion", "扩散模型",
+]
+
+
+def weak_cards(limit=10):
+    """薄弱卡：复习记错（again）≥2 次且未掌握的卡。返回 [{source_url, title, again_count}]。"""
+    conn = _conn()
+    try:
+        rows = conn.execute(
+            """SELECT r.card_source_url, COUNT(*) AS n, c.title, c.memory_state
+               FROM reviews r JOIN cards c ON c.source_url = r.card_source_url
+               WHERE r.result = 'again'
+               GROUP BY r.card_source_url
+               HAVING COUNT(*) >= 2""",
+        ).fetchall()
+    finally:
+        conn.close()
+    out = []
+    for r in rows:
+        if r["memory_state"] == "mastered":
+            continue
+        out.append({"source_url": r["card_source_url"],
+                    "title": r["title"] or "",
+                    "again_count": r["n"]})
+    return out[:limit]
+
+
+def compute_profile():
+    """计算学习画像（从行为数据聚合，全部现成数据，零新增埋点）：
+    {templates 类型偏好, difficulty 难度偏好, topics 主题兴趣, weak 薄弱卡,
+     total_open 点开数, accuracy 近30天复习正确率}"""
+    conn = _conn()
+    try:
+        opened_rows = conn.execute(
+            "SELECT DISTINCT source_url FROM events WHERE event = 'card_open' AND source_url != ''"
+        ).fetchall()
+    finally:
+        conn.close()
+    opened_urls = [r["source_url"] for r in opened_rows]
+
+    templates = {}
+    difficulty = {}
+    topics = {}
+    if opened_urls:
+        cards = []
+        conn = _conn()
+        try:
+            for u in opened_urls:
+                row = conn.execute(
+                    "SELECT template, title, summary, difficulty FROM cards WHERE source_url = ?",
+                    (u,),
+                ).fetchone()
+                if row:
+                    cards.append(dict(row))
+        finally:
+            conn.close()
+        for c in cards:
+            tpl = c.get("template") or "unknown"
+            templates[tpl] = templates.get(tpl, 0) + 1
+            diff = c.get("difficulty") or "未知"
+            difficulty[diff] = difficulty.get(diff, 0) + 1
+            text = ((c.get("title") or "") + " " + (c.get("summary") or "")).lower()
+            for kw in PROFILE_KEYWORDS:
+                if kw in text:
+                    topics[kw] = topics.get(kw, 0) + 1
+    top_topics = sorted(topics.items(), key=lambda kv: kv[1], reverse=True)[:6]
+
+    # 近 30 天复习正确率
+    since = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+    conn = _conn()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*), SUM(CASE WHEN result = 'good' THEN 1 ELSE 0 END) FROM reviews WHERE review_date >= ?",
+            (since,),
+        ).fetchone()
+    finally:
+        conn.close()
+    total, good = (row[0] or 0), (row[1] or 0)
+
+    return {
+        "templates": templates,
+        "difficulty": difficulty,
+        "topics": [k for k, _ in top_topics],
+        "weak": weak_cards(),
+        "total_open": len(opened_urls),
+        "accuracy": round(good / total, 3) if total else None,
+        "review_total": total,
+    }
+
+
+def get_profile(refresh=False):
+    """读画像（user_state 缓存，daily_agent 每天刷新）；无缓存或 refresh=True 时重算。"""
+    if not refresh:
+        raw = get_user_state("profile")
+        if raw:
+            try:
+                return json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                pass
+    p = compute_profile()
+    set_user_state("profile", json.dumps(p, ensure_ascii=False))
+    return p
+
+
 # ===== M3 自动修复：备份 / 回滚辅助 =====
 
 def progress_dates_of(source_url):
