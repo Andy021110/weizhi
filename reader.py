@@ -1109,6 +1109,9 @@ class ReaderHandler(BaseHTTPRequestHandler):
 
 def main():
     db.init_db()
+    fixed = db.auto_complete_plans()  # 修复存量：学完未归档的计划
+    if fixed:
+        print(f"  已自动归档 {fixed} 个学完未消失的任务")
     server = ThreadingHTTPServer(("127.0.0.1", PORT), ReaderHandler)
     print("=" * 44)
     print("  微知 · 碎片阅读器已启动")

@@ -301,6 +301,33 @@ def _maybe_complete_plan(conn, plan_id):
         conn.execute("UPDATE plans SET status = 'done' WHERE id = ? AND status != 'done'", (plan_id,))
 
 
+def auto_complete_plans():
+    """修复存量：已学完（progress 覆盖全部实际卡）但状态仍是 active 的计划 → done（幂等）。
+    解决「任务完成了还占位置」：学完判定只在 mark_done 时触发，老数据可能漏判。"""
+    conn = _conn()
+    try:
+        rows = conn.execute("SELECT id FROM plans WHERE status != 'done'").fetchall()
+        fixed = 0
+        for r in rows:
+            pid = r["id"]
+            total = conn.execute("SELECT COUNT(*) FROM cards WHERE plan_id = ?", (pid,)).fetchone()[0]
+            if total <= 0:
+                continue
+            done = conn.execute(
+                """SELECT COUNT(DISTINCT p.card_source_url) FROM progress p
+                   JOIN cards c ON c.source_url = p.card_source_url
+                   WHERE c.plan_id = ?""",
+                (pid,),
+            ).fetchone()[0]
+            if done >= total:
+                conn.execute("UPDATE plans SET status = 'done' WHERE id = ? AND status != 'done'", (pid,))
+                fixed += 1
+        conn.commit()
+        return fixed
+    finally:
+        conn.close()
+
+
 def get_done_dates():
     """返回所有已完成的 {date: [source_url, ...]}。"""
     conn = _conn()

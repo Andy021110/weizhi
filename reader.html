@@ -1613,6 +1613,7 @@
           '<div class="task-card-actions">' +
             '<button class="edit-btn" data-pause="' + p.id + '">' + (isPaused ? '继续' : '暂停') + '</button>' +
             '<button class="edit-btn" data-continue="' + p.id + '">续学</button>' +
+            '<button class="edit-btn" data-complete="' + p.id + '" style="color:var(--primary)">完成</button>' +
             '<button class="edit-btn" data-drop="' + p.id + '" style="color:var(--red)">放弃</button>' +
           '</div>' +
         '</div>';
@@ -1664,6 +1665,15 @@
         var id = parseInt(this.getAttribute('data-drop'), 10);
         if (!confirm('确定放弃这个计划吗？（卡片会保留）')) return;
         postJSON('/api/plan/delete', { id: id }).then(function () { loadPlans(); });
+      });
+    }
+    // 手动「完成」：学完（或想收尾）的任务标记完成，从任务列表隐藏（卡片保留在原计划）
+    var completes = sec.querySelectorAll('[data-complete]');
+    for (var cj = 0; cj < completes.length; cj++) {
+      completes[cj].addEventListener('click', function () {
+        var id = parseInt(this.getAttribute('data-complete'), 10);
+        if (!confirm('标记该任务为已完成？完成后从任务列表隐藏（卡片保留，可随时「统计」查看）。')) return;
+        postJSON('/api/plan/update', { id: id, status: 'done' }).then(function () { loadPlans(); });
       });
     }
   }
