@@ -846,6 +846,21 @@ class ReaderHandler(BaseHTTPRequestHandler):
             self._send_json({"cards": db.search_cards(q)})
             return
 
+        if path == "/api/card":
+            # 单卡详情（badcase 展开查看用）：按 source_url 取完整内容
+            src = (qs.get("source_url") or [""])[0]
+            card = db.get_card(src) if src else None
+            if not card:
+                self._send_json({"card": None})
+                return
+            # 只返回前端展示所需字段，避免携带 _gen_input 等内部数据
+            keys = ["source_url", "title", "template", "summary", "body", "difficulty",
+                    "timeliness", "credibility", "published", "author", "source",
+                    "think_question", "think_answer", "open_question", "quiz",
+                    "core_points", "_meta"]
+            self._send_json({"card": {k: card.get(k) for k in keys if k in card}})
+            return
+
         if path == "/api/favorites":
             self._send_json({"cards": db.load_favorites()})
             return

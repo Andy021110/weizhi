@@ -510,6 +510,18 @@
   .qc-issue { font-size: 11px; background: rgba(190,86,47,.1); color: #be562f; border-radius: 999px; padding: 2px 8px; }
   .qc-regen { font-size: 12px; font-weight: 700; color: #fff; background: var(--primary); border: none; border-radius: 999px; padding: 6px 14px; cursor: pointer; }
   .qc-regen:disabled { opacity: .6; cursor: not-allowed; }
+  .qc-regen.ghost { background: transparent; color: var(--text-2); border: 1px solid var(--line); }
+  .qc-badcase-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .qc-detail { margin-top: 8px; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; font-size: 12px; max-height: 300px; overflow: auto; line-height: 1.65; color: var(--text-2); -webkit-overflow-scrolling: touch; }
+  .qc-detail b { color: var(--text-1); }
+  .qc-detail .qc-dl { margin: 8px 0 0; }
+  .qc-detail .qc-dl-h { font-weight: 700; color: var(--text-1); font-size: 11px; margin-bottom: 2px; }
+  .qc-detail-loading { color: var(--text-3); padding: 6px 0; }
+  .qc-summary { margin-top: 10px; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; font-size: 12px; }
+  .qc-sum-row { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+  .qc-sum-row:last-child { margin-bottom: 0; }
+  .qc-sum-label { font-weight: 700; color: var(--text-1); flex-shrink: 0; font-size: 12px; padding-top: 2px; }
+  .qc-sum-text { color: var(--text-2); line-height: 1.6; word-break: break-all; }
 
   /* 通知中心（M3 程序内推送） */
   .notif-item { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 8px; cursor: pointer; }
@@ -518,6 +530,7 @@
   .notif-head b { overflow-wrap: break-word; }
   .notif-date { font-size: 11px; color: var(--text-3); flex-shrink: 0; }
   .notif-body { font-size: 12px; color: var(--text-2); margin-top: 4px; line-height: 1.6; }
+  .notif-go { display: block; color: var(--primary); font-weight: 700; margin-top: 4px; font-size: 12px; }
   .onboard-overlay { position: fixed; inset: 0; z-index: 110; background: rgba(43,43,40,.5); display: flex; align-items: center; justify-content: center; padding: 24px; }
   .onboard-box { width: 100%; max-width: 360px; background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 28px 24px; }
   .onboard-title { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
@@ -596,6 +609,7 @@
       <div class="create-box-title">质量巡检</div>
       <div class="create-hint" id="qcMeta"></div>
       <div id="qcMetrics"></div>
+      <div id="qcSummary"></div>
       <div id="qcBadcases"></div>
       <button class="create-cancel" id="qcClose" style="margin-top:12px">关闭</button>
     </div>
@@ -2372,6 +2386,25 @@
     $('qcMetrics').innerHTML = '<div class="qc-metrics-grid">' + cells.map(function (c) {
       return '<div class="qc-metric"><div class="qc-metric-num">' + c[1] + '</div><div class="qc-metric-label">' + c[0] + '</div></div>';
     }).join('') + '</div>';
+    // 收集总结（badcase 问题分布 + 修复统计 + 7 天趋势）
+    var sm = r.summary || {};
+    var sumHtml = '';
+    if (sm.issues && sm.issues.length) {
+      sumHtml += '<div class="qc-sum-row"><span class="qc-sum-label">问题类型</span>' +
+        sm.issues.slice(0, 4).map(function (x) { return '<span class="qc-issue">' + escapeHtml(x[0]) + ' ×' + x[1] + '</span>'; }).join('') + '</div>';
+    }
+    if (sm.repair && sm.repair.total) {
+      sumHtml += '<div class="qc-sum-row"><span class="qc-sum-label">自动修复</span>' +
+        '<span class="qc-sum-text">' + sm.repair.ok + '/' + sm.repair.total + ' 成功' +
+        (sm.repair.rate != null ? '（' + Math.round(sm.repair.rate * 100) + '%）' : '') + '</span></div>';
+    }
+    if (sm.trend && sm.trend.length > 1) {
+      sumHtml += '<div class="qc-sum-row"><span class="qc-sum-label">近 ' + sm.trend.length + ' 天通过率</span>' +
+        '<span class="qc-sum-text">' + sm.trend.map(function (t) {
+          return t.date.slice(5) + ' ' + (t.pass_rate != null ? Math.round(t.pass_rate * 100) + '%' : '-');
+        }).join(' → ') + '</span></div>';
+    }
+    $('qcSummary').innerHTML = sumHtml ? '<div class="qc-summary">' + sumHtml + '</div>' : '';
     var list = r.badcases || [];
     var box = $('qcBadcases');
     if (!list.length) {
@@ -2385,15 +2418,20 @@
             '<span class="qc-score">' + (b.score != null ? b.score + ' 分' : '规则') + '</span></div>' +
             '<div class="qc-badcase-why">' + escapeHtml(b.reason || '') + '</div>' +
             '<div class="qc-issues">' + issues + '</div>' +
-            '<button type="button" class="qc-regen" data-url="' + escapeHtml(b.source_url) + '">重新生成</button>' +
+            '<div class="qc-badcase-actions">' +
+              '<button type="button" class="qc-regen ghost" data-detail="' + escapeHtml(b.source_url) + '">查看详情</button>' +
+              '<button type="button" class="qc-regen" data-url="' + escapeHtml(b.source_url) + '">重新生成</button>' +
+            '</div>' +
+            '<div class="qc-detail" style="display:none"></div>' +
           '</div>';
         }).join('');
-      var regenBtns = box.querySelectorAll('.qc-regen');
+      var regenBtns = box.querySelectorAll('.qc-regen[data-url]');
       for (var i = 0; i < regenBtns.length; i++) {
         regenBtns[i].addEventListener('click', function () {
           regenBadcase(this.getAttribute('data-url'), this);
         });
       }
+      bindQcDetail(box);
     }
     // M3 自动修复记录（低分 badcase 已被巡检自动重生成，可回滚）
     var acts = r.auto_actions || [];
@@ -2405,7 +2443,11 @@
             '<div class="qc-badcase-head"><b>' + (i + 1) + '. ' + escapeHtml(a.title || '(无标题)') + '</b>' +
             '<span class="qc-score" style="color:var(--primary)">自动修复</span></div>' +
             '<div class="qc-badcase-why">' + escapeHtml(a.reason || '') + '</div>' +
-            '<button type="button" class="qc-regen" data-rollback="' + escapeHtml(a.source_url) + '" style="background:transparent;color:var(--red);border:1px solid var(--red)">↩ 回滚</button>' +
+            '<div class="qc-badcase-actions">' +
+              '<button type="button" class="qc-regen ghost" data-detail="' + escapeHtml(a.source_url) + '">查看详情</button>' +
+              '<button type="button" class="qc-regen" data-rollback="' + escapeHtml(a.source_url) + '" style="background:transparent;color:var(--red);border:1px solid var(--red)">↩ 回滚</button>' +
+            '</div>' +
+            '<div class="qc-detail" style="display:none"></div>' +
           '</div>';
         }).join('');
       box.innerHTML += actHtml;
@@ -2415,11 +2457,47 @@
           rollbackBadcase(this.getAttribute('data-rollback'), this);
         });
       }
+      bindQcDetail(box);
     }
     var failActs = acts.filter(function (a) { return !a.success; });
     if (failActs.length) {
       box.innerHTML += '<div class="qc-badcase-why" style="margin-top:8px;color:var(--text-3)">自动修复失败 ' + failActs.length + ' 张（' +
         failActs.map(function (a) { return escapeHtml((a.title || a.source_url || '').slice(0, 16)); }).join('、') + '），请手动重生成</div>';
+    }
+  }
+
+  function bindQcDetail(container) {
+    // badcase「查看详情」：点开拉取该卡完整内容（手机友好，展开区可滚动）
+    var btns = container.querySelectorAll('[data-detail]');
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].addEventListener('click', function () {
+        var src = this.getAttribute('data-detail');
+        var detail = this.closest('.qc-badcase').querySelector('.qc-detail');
+        if (!detail) return;
+        if (detail.style.display === 'block') { detail.style.display = 'none'; this.textContent = '查看详情'; return; }
+        detail.style.display = 'block';
+        detail.innerHTML = '<div class="qc-detail-loading">加载中...</div>';
+        this.textContent = '收起';
+        fetchJSON('/api/card?source_url=' + encodeURIComponent(src)).then(function (data) {
+          var c = data.card;
+          if (!c) {
+            detail.innerHTML = '<div class="qc-detail-loading">该卡已被重新生成或删除，请在卡片列表查看新版本</div>';
+            return;
+          }
+          var html = '';
+          if (c.summary) html += '<div>' + escapeHtml(c.summary) + '</div>';
+          if (c.core_points && c.core_points.length) {
+            html += '<div class="qc-dl"><div class="qc-dl-h">核心观点</div><div>' + c.core_points.map(function (p) { return '· ' + escapeHtml(p); }).join('<br>') + '</div></div>';
+          }
+          if (c.think_answer) html += '<div class="qc-dl"><div class="qc-dl-h">思考题回答（' + c.think_answer.length + ' 字）</div><div>' + escapeHtml(c.think_answer) + '</div></div>';
+          if (c.body) html += '<div class="qc-dl"><div class="qc-dl-h">正文（' + c.body.length + ' 字）</div><div>' + escapeHtml(c.body.slice(0, 500)) + (c.body.length > 500 ? '…' : '') + '</div></div>';
+          if (c.quiz && c.quiz.length) html += '<div class="qc-dl"><div class="qc-dl-h">随堂测验 ' + c.quiz.length + ' 题</div><div>' + c.quiz.map(function (q, qi) { return (qi + 1) + '. ' + escapeHtml((q.question || '').slice(0, 60)); }).join('<br>') + '</div></div>';
+          if (!html) html = '<div class="qc-detail-loading">卡片无正文内容（评分信息见上方）</div>';
+          detail.innerHTML = html;
+        }).catch(function () {
+          detail.innerHTML = '<div class="qc-detail-loading">加载失败，请重试</div>';
+        });
+      });
     }
   }
 
@@ -2477,9 +2555,10 @@
       if (!list.length) { $('notifList').innerHTML = '<div class="qc-none">暂无通知</div>'; return; }
       $('notifList').innerHTML = list.map(function (n) {
         var lv = n.level === 'action' ? ' style="color:var(--red)"' : (n.level === 'warn' ? ' style="color:var(--accent)"' : '');
-        return '<div class="notif-item' + (n.read ? '' : ' unread') + '" data-id="' + n.id + '">' +
+        var go = n.type === 'badcase_pending' ? ' data-goto="qc"' : '';
+        return '<div class="notif-item' + (n.read ? '' : ' unread') + '" data-id="' + n.id + '"' + go + '>' +
           '<div class="notif-head"><b' + lv + '>' + escapeHtml(n.title || '') + '</b><span class="notif-date">' + escapeHtml(n.date || '') + '</span></div>' +
-          '<div class="notif-body">' + escapeHtml(n.body || '') + '</div>' +
+          '<div class="notif-body">' + escapeHtml(n.body || '') + (n.type === 'badcase_pending' ? '<span class="notif-go">查看并处理 →</span>' : '') + '</div>' +
         '</div>';
       }).join('');
       var items = $('notifList').querySelectorAll('.notif-item.unread');
@@ -2487,10 +2566,16 @@
         items[i].addEventListener('click', function () {
           var id = parseInt(this.getAttribute('data-id'), 10);
           var el = this;
+          var gotoQc = this.getAttribute('data-goto') === 'qc';
           postJSON('/api/notifications/read', { ids: [id] }).then(function () {
             el.classList.remove('unread');
             refreshNotifBadge();
           }).catch(function () {});
+          // badcase 通知：标已读后直达质检报告（手机上直接能看 badcase 并处理）
+          if (gotoQc) {
+            $('notifOverlay').style.display = 'none';
+            openQcReport();
+          }
         });
       }
     }).catch(function () {});

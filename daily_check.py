@@ -328,6 +328,53 @@ def auto_regen(api_key, badcases, backup_dir, max_actions=3):
     return actions
 
 
+def build_summary(report):
+    """badcase 收集总结：问题类型分布 + 模板分布 + 修复统计 + 近 7 天趋势。
+
+    前端质检弹窗的「汇总」区块数据源；同时沉淀为 skill 可复用的质检复盘数据。
+    """
+    badcases = report.get("badcases") or []
+    issue_counter = {}
+    for b in badcases:
+        issues = b.get("issues") or []
+        key = issues[0] if issues else ((b.get("reason") or "其他")[:10])
+        issue_counter[key] = issue_counter.get(key, 0) + 1
+    tpl_counter = {}
+    for b in badcases:
+        c = db.get_card(b.get("source_url") or "")
+        tpl = (c or {}).get("template") or "未知"
+        tpl_counter[tpl] = tpl_counter.get(tpl, 0) + 1
+    acts = report.get("auto_actions") or []
+    ok = [a for a in acts if a.get("success")]
+    trend = []
+    for i in range(6, -1, -1):
+        d = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
+        p = os.path.join(REPORTS_DIR, d + ".json")
+        if not os.path.exists(p):
+            continue
+        try:
+            with open(p, encoding="utf-8") as f:
+                r = json.load(f)
+            trend.append({
+                "date": d,
+                "checked": r.get("checked"),
+                "pass_rate": r.get("pass_rate"),
+                "badcases": len(r.get("badcases") or []),
+            })
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {
+        "issues": sorted(issue_counter.items(), key=lambda x: -x[1]),
+        "templates": sorted(tpl_counter.items(), key=lambda x: -x[1]),
+        "repair": {
+            "ok": len(ok),
+            "total": len(acts),
+            "rate": round(len(ok) / len(acts), 3) if acts else None,
+        },
+        "trend": trend,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=20, help="检查张数上限")
@@ -385,6 +432,9 @@ def main():
 
     # M3 安全子集：自动修复（低分/可修 badcase 自动重生成，带备份可回滚）
     report["auto_actions"] = auto_regen(api_key, badcases, os.path.join(REPORTS_DIR, "backups"))
+
+    # 收集总结：问题类型分布 + 模板分布 + 修复统计 + 近 7 天趋势
+    report["summary"] = build_summary(report)
 
     os.makedirs(REPORTS_DIR, exist_ok=True)
     path = os.path.join(REPORTS_DIR, report["date"] + ".json")
