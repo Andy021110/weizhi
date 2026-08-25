@@ -1,6 +1,6 @@
 # WeiZhi
 
-Personal AI learning steward for AI practitioners. Fetches, generates, recommends, reviews, and self-heals — a full learning loop that runs unattended.
+**Single-user self-hosted MVP** · Personal AI learning steward for AI practitioners. Fetches, generates, recommends, reviews, and self-heals — a full learning loop that runs unattended. Not a production-grade platform; positioned as personal knowledge management + learning automation.
 
 [中文](README.md) | English
 
@@ -78,6 +78,15 @@ python daily_agent.py --dry-run       # preview steward decisions
 | 6:00 / 18:00 | `pipeline.py` | Fetch 8 sources → generate new cards |
 | 3:30 | `daily_check.py` | Inspect & score → auto-fix bad cards with backup |
 | 3:35 | `daily_agent.py` | Steward decisions → notifications (picks / pending / weekly report) |
+
+## Testing
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest tests/ -q     # 39 tests, ~1s, no LLM API calls
+```
+
+Covers: SM-2 scheduling, SimHash cross-source dedup, inspection rules, and steward LLM-output whitelist validation (isolated temp SQLite, never touches real data).
 
 ## Repository Layout
 

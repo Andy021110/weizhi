@@ -1,25 +1,49 @@
 {
   "deepseek_api_key": "sk-你的key填这里",
+  "access_token": "自定义访问口令",
+  "review_limit": 30,
+  "daily_generate_limit": 15,
+  "interested_topics": ["Agent", "大模型", "RAG", "AI 产品"],
   "sources": [
     {
-      "name": "MIT Technology Review",
-      "rss": "https://www.technologyreview.com/feed/",
-      "category": "科技"
+      "name": "宝玉的博客",
+      "rss": "https://baoyu.io/feed.xml",
+      "category": "前沿"
     },
     {
-      "name": "Hacker News",
-      "rss": "https://hnrss.org/frontpage",
-      "category": "科技"
+      "name": "量子位",
+      "rss": "https://www.qbitai.com/feed",
+      "category": "前沿"
     },
     {
-      "name": "阮一峰的网络日志",
-      "rss": "http://www.ruanyifeng.com/blog/atom.xml",
-      "category": "科技"
+      "name": "OpenAI 官方",
+      "rss": "https://openai.com/news/rss.xml",
+      "category": "前沿"
     },
     {
-      "name": "少数派",
-      "rss": "https://sspai.com/feed",
-      "category": "技能"
+      "name": "DeepMind 官方",
+      "rss": "https://deepmind.google/blog/rss.xml",
+      "category": "前沿"
+    },
+    {
+      "name": "Import AI",
+      "rss": "https://importai.substack.com/feed",
+      "category": "行业"
+    },
+    {
+      "name": "Ahead of AI",
+      "rss": "https://magazine.sebastianraschka.com/feed",
+      "category": "原理"
+    },
+    {
+      "name": "HuggingFace Blog",
+      "rss": "https://huggingface.co/blog/feed.xml",
+      "category": "原理"
+    },
+    {
+      "name": "arXiv cs.LG",
+      "rss": "https://rss.arxiv.org/rss/cs.LG",
+      "category": "论文"
     }
   ]
 }

@@ -1,6 +1,6 @@
 # 微知 WeiZhi
 
-为 AI 从业者打造的个人学习管家：自动抓取、生成、推荐、复习、自愈——一条无人值守就能完整运转的学习闭环。
+**单用户自托管 MVP** · 为 AI 从业者打造的个人学习管家：自动抓取、生成、推荐、复习、自愈——一条无人值守就能完整运转的学习闭环。非生产级平台，定位是个人知识管理 + 学习自动化。
 
 中文 | [English](README.en.md)
 
@@ -78,6 +78,15 @@ python daily_agent.py --dry-run       # 预览管家决策（不执行）
 | 6:00 / 18:00 | `pipeline.py` | 抓取 8 源 → 生成新卡 |
 | 3:30 | `daily_check.py` | 巡检打分 → 自动修复坏卡（备份可回滚）|
 | 3:35 | `daily_agent.py` | 管家决策 → 通知（荐食 / 待拍板 / 周报）|
+
+## 测试
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest tests/ -q     # 39 个单测，约 1s，不调用任何 LLM API
+```
+
+覆盖：SM-2 间隔算法、SimHash 跨源去重、巡检客观规则、管家 LLM 输出白名单校验（用临时 SQLite 库隔离，不污染真实数据）。
 
 ## 目录结构
 
