@@ -2,6 +2,8 @@
 
 Personal AI learning steward for AI practitioners. Fetches, generates, recommends, reviews, and self-heals — a full learning loop that runs unattended.
 
+English | [中文](README.zh-CN.md)
+
 ![Python](https://img.shields.io/badge/Python-3.10-blue) ![License](https://img.shields.io/badge/License-MIT-green) ![PWA](https://img.shields.io/badge/PWA-ready-orange) ![SQLite](https://img.shields.io/badge/Storage-SQLite-lightgrey)
 
 ## Overview
