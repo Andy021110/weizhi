@@ -1,104 +1,104 @@
-# WeiZhi
+# 微知 WeiZhi
 
-Personal AI learning steward for AI practitioners. Fetches, generates, recommends, reviews, and self-heals — a full learning loop that runs unattended.
+为 AI 从业者打造的个人学习管家：自动抓取、生成、推荐、复习、自愈——一条无人值守就能完整运转的学习闭环。
 
-English | [中文](README.zh-CN.md)
+中文 | [English](README.en.md)
 
 ![Python](https://img.shields.io/badge/Python-3.10-blue) ![License](https://img.shields.io/badge/License-MIT-green) ![PWA](https://img.shields.io/badge/PWA-ready-orange) ![SQLite](https://img.shields.io/badge/Storage-SQLite-lightgrey)
 
-## Overview
+## 简介
 
-WeiZhi is a self-hosted learning system that turns fragmented time into retained knowledge:
+微知是一个自托管的学习系统，把碎片时间转化为真正的知识沉淀：
 
-- **Ingest** — RSS aggregation from 8 curated sources (official blogs, arXiv, deep technical blogs)
-- **Generate** — DeepSeek produces structured knowledge cards across 6 templates (vocabulary / reading / math / general knowledge / skills / code)
-- **Recommend** — daily Top-3 picks with reasoning, ranked by freshness × source authority × personal interest
-- **Review** — SM-2 spaced repetition with quizzes, thinking questions, and AI-graded short answers
-- **Self-heal** — daily quality inspection (rule checks + AI scoring); bad cards are regenerated automatically with backup and rollback
+- **摄取** — 8 个精选 RSS 源聚合（官方博客、arXiv、深度技术博客）
+- **生成** — DeepSeek 产出 6 类结构化知识卡（词汇 / 精读 / 数学 / 通识 / 技能 / 代码）
+- **推荐** — 每日 Top 3 荐食（带推荐理由），按新鲜度 × 来源权威 × 个人兴趣排序
+- **复习** — SM-2 间隔重复，含随堂测验、思考题、AI 批改的简答题
+- **自愈** — 每日质量巡检（规则检查 + AI 打分），坏卡自动重新生成，带备份与回滚
 
-The system runs as a ReAct-style pipeline: observe → think (LLM decides) → act → report. It stops for human input only when a decision requires judgment.
+系统以 ReAct 流水线方式运行：观察 → 思考（LLM 决策）→ 行动 → 汇报，仅在需要人工判断时停下。
 
-## Features
+## 特性
 
-- Type auto-detection when creating study plans (no manual template selection)
-- Authority & freshness system: 4 timeliness tiers (stable / evolving / fast / event) × 4 credibility levels (A-D), with expiry hints on cards
-- Learning profile: interest topics, weak cards (≥2 consecutive mistakes), review accuracy — feeds back into ranking and daily picks
-- Programmatic notifications (bell + popup): pending decisions, review backlog, streak warnings, weekly report
-- Incremental fetching with ETag conditional requests, cross-source SimHash dedup (first-party preferred), retry with backoff
-- PWA frontend (add-to-home-screen), single-file vanilla JS, zero build step
-- Entire intelligent layer costs < ¥10/month (DeepSeek API); total deployment fits on a 2C2G HK VPS
+- 建计划时自动识别类型（无需手动选择模板）
+- 权威与时效体系：4 档时效（稳定 / 演进 / 快变 / 时点）× 4 级权威（A-D），卡片带过期提示
+- 学习画像：兴趣主题、薄弱卡（连续记错 ≥2 次）、复习准确率——回喂推荐与每日荐食
+- 程序内通知（铃铛 + 弹窗）：待拍板事项、复习拖欠、断签预警、每周报告
+- 增量抓取（ETag 条件请求）、跨源 SimHash 去重（一手来源优先）、失败指数退避重试
+- PWA 前端（可添加到桌面），单文件原生 JS，零构建
+- 全部智能层月成本 < ¥10（DeepSeek API）；整套部署在一台 2C2G 香港轻量服务器
 
-## Architecture
+## 架构
 
 ```
-┌───────────── Perception ─────────────┐
-│  pipeline.py (cron 6:00/18:00)        │
-│  fetch → dedup → generate cards       │
-└──────────────────────────────────────┘
+┌───────────── 感知层 ─────────────┐
+│  pipeline.py（cron 6:00/18:00）  │
+│  抓取 → 去重 → 生成卡片           │
+└─────────────────────────────────┘
                    ▼
-┌───────────── Action ─────────────────┐
-│  reader.py (persistent service)       │
-│  CRUD / SM-2 / ranking / profile      │
-│  reader.html (PWA frontend)           │
-└──────────────────────────────────────┘
+┌───────────── 行动层 ─────────────┐
+│  reader.py（常驻服务）            │
+│  增删改查 / SM-2 / 排序 / 画像     │
+│  reader.html（PWA 前端）          │
+└─────────────────────────────────┘
                    ▼
-┌───────────── Feedback ───────────────┐
-│  daily_check.py (cron 3:30)           │
-│  rules + AI scoring → auto-fix+backup │
-└──────────────────────────────────────┘
+┌───────────── 反馈层 ─────────────┐
+│  daily_check.py（cron 3:30）     │
+│  规则 + AI 打分 → 自动修复+备份    │
+└─────────────────────────────────┘
                    ▼
-┌───────────── Thought ────────────────┐
-│  daily_agent.py (cron 3:35)           │
-│  LLM decisions: notify / fix / pick   │
-└──────────────────────────────────────┘
+┌───────────── 思考层 ─────────────┐
+│  daily_agent.py（cron 3:35）     │
+│  LLM 决策：通知 / 修复 / 荐食      │
+└─────────────────────────────────┘
 ```
 
-Modules: `reader.py` (HTTP API + business logic) · `pipeline.py` (fetch pipeline) · `daily_check.py` (quality inspection) · `daily_agent.py` (orchestration) · `db.py` (SQLite layer) · `prompts.py` (templates + classification)
+模块：`reader.py`（HTTP API + 业务逻辑）· `pipeline.py`（抓取管线）· `daily_check.py`（质量巡检）· `daily_agent.py`（编排层）· `db.py`（SQLite 数据层）· `prompts.py`（模板与分类）
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for data model, design decisions, and cost model.
+数据模型、设计决策与成本模型见 [ARCHITECTURE.md](ARCHITECTURE.md)（[English](ARCHITECTURE.en.md)）。
 
-## Quick Start
+## 快速开始
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-cp config.example.json config.json    # add your DeepSeek API key
-python reader.py                      # open http://localhost:8000/?key=<your token>
+cp config.example.json config.json    # 填入 DeepSeek API key
+python reader.py                      # 打开 http://localhost:8000/?key=<你的token>
 
-python pipeline.py --limit 2          # fetch one round of RSS and generate cards
-python daily_check.py --dry-run --limit 3   # preview quality inspection
-python daily_agent.py --dry-run       # preview steward decisions
+python pipeline.py --limit 2          # 手动抓一轮 RSS 并生成卡片
+python daily_check.py --dry-run --limit 3   # 预览质量巡检（不落盘）
+python daily_agent.py --dry-run       # 预览管家决策（不执行）
 ```
 
-## Automated Pipeline
+## 自动化流水线
 
-| Time (cron) | Task | Purpose |
+| 时间（cron）| 任务 | 作用 |
 |---|---|---|
-| 6:00 / 18:00 | `pipeline.py` | Fetch 8 sources → generate new cards |
-| 3:30 | `daily_check.py` | Inspect & score → auto-fix bad cards with backup |
-| 3:35 | `daily_agent.py` | Steward decisions → notifications (picks / pending / weekly report) |
+| 6:00 / 18:00 | `pipeline.py` | 抓取 8 源 → 生成新卡 |
+| 3:30 | `daily_check.py` | 巡检打分 → 自动修复坏卡（备份可回滚）|
+| 3:35 | `daily_agent.py` | 管家决策 → 通知（荐食 / 待拍板 / 周报）|
 
-## Repository Layout
+## 目录结构
 
 ```
 content-pipeline/
-├── reader.py            # main service (HTTP API + business logic)
-├── reader.html          # PWA frontend, single file
-├── prompts.py           # 6 templates + authority/freshness + classification
-├── db.py                # SQLite data layer
-├── pipeline.py          # RSS pipeline: incremental + dedup + ETag + retry
-├── daily_check.py       # quality inspection & auto-fix
-├── daily_agent.py       # ReAct orchestration layer
-├── config.example.json  # config template (never commit config.json)
+├── reader.py            # 主服务（HTTP API + 业务逻辑）
+├── reader.html          # PWA 前端，单文件
+├── prompts.py           # 6 类模板 + 权威时效 + 类型分类
+├── db.py                # SQLite 数据层
+├── pipeline.py          # RSS 管线：增量 + 去重 + ETag + 重试
+├── daily_check.py       # 质量巡检与自动修复
+├── daily_agent.py       # ReAct 编排层
+├── config.example.json  # 配置模板（config.json 绝不入库）
 ├── deploy.sh / nginx.conf / weizhi-reader.service / DEPLOY.md
-└── docs/                # product & design documents (14 files)
+└── docs/                # 产品与设计文档（中文，14 篇）
 ```
 
-## Security
+## 安全说明
 
-- `config.json` (API key / access token) is excluded via `.gitignore`; use `config.example.json` as template
-- Production: SSH key auth, fail2ban, service bound to 127.0.0.1 behind nginx
+- `config.json`（API key / access token）已被 `.gitignore` 排除，公开仓库请使用 `config.example.json` 模板
+- 生产环境建议：SSH 密钥登录、fail2ban、服务仅监听 127.0.0.1 并由 nginx 反代
 
 ## License
 
