@@ -96,6 +96,64 @@ def load_latest_report():
         return None
 
 
+def _load_reports(days=7):
+    """读最近 N 天质检报告（按日期倒序），用于仪表盘趋势与修复历史。"""
+    if not os.path.isdir(REPORTS_DIR):
+        return []
+    try:
+        files = sorted(f for f in os.listdir(REPORTS_DIR) if f.endswith(".json"))
+    except OSError:
+        return []
+    reports = []
+    for f in files[-days:]:
+        try:
+            with open(os.path.join(REPORTS_DIR, f), "r", encoding="utf-8") as fp:
+                reports.append(json.load(fp))
+        except (OSError, json.JSONDecodeError):
+            continue
+    return reports
+
+
+def build_dashboard():
+    """学习仪表盘聚合：统计 + 模板分布 + 质量趋势/问题 + 画像 + 修复记录。
+
+    全部数据来自现有库与报告文件，无额外成本。前端「统计」页渲染。
+    """
+    report = load_latest_report() or {}
+    sm = report.get("summary") or {}
+    profile = db.get_profile()
+    repairs = []
+    for r in _load_reports(days=7):
+        date = r.get("date", "")
+        for a in r.get("auto_actions") or []:
+            if not a.get("success"):
+                continue
+            repairs.append({
+                "date": date,
+                "title": (a.get("title") or "")[:30],
+                "source_url": a.get("source_url", ""),
+                "change": (a.get("reason") or "自动修复")[:24],
+            })
+    return {
+        "stats": db.stats(),
+        "template_dist": db.template_dist(),
+        "quality": {
+            "pass_rate": report.get("pass_rate"),
+            "avg_score": report.get("avg_score"),
+            "checked": report.get("checked"),
+            "trend": sm.get("trend") or [],
+            "issues": sm.get("issues") or [],
+            "repair": sm.get("repair"),
+        },
+        "profile": {
+            "topics": (profile.get("topics") or [])[:6],
+            "weak": (profile.get("weak") or [])[:5],
+            "accuracy": profile.get("accuracy"),
+        },
+        "repairs": repairs[:8],
+    }
+
+
 GRADE_SYSTEM = """你是一位严格的评分老师，负责给学生的简答题打分。
 根据参考答案和评分要点，客观评估学生的回答。
 
@@ -867,6 +925,10 @@ class ReaderHandler(BaseHTTPRequestHandler):
 
         if path == "/api/stats":
             self._send_json(db.stats())
+            return
+
+        if path == "/api/dashboard":
+            self._send_json(build_dashboard())
             return
 
         if path == "/api/report/latest":

@@ -24,6 +24,7 @@ The system runs as a ReAct-style pipeline: observe → think (LLM decides) → a
 - Authority & freshness system: 4 timeliness tiers (stable / evolving / fast / event) × 4 credibility levels (A-D), with expiry hints on cards
 - Learning profile: interest topics, weak cards (≥2 consecutive mistakes), review accuracy — feeds back into ranking and daily picks
 - Programmatic notifications (bell + popup): pending decisions, review backlog, streak warnings, weekly report
+- Learning dashboard: knowledge overview / quality trend (7-day pass rate) / issue-type distribution / repair history (with rollback) visualized
 - Incremental fetching with ETag conditional requests, cross-source SimHash dedup (first-party preferred), retry with backoff
 - PWA frontend (add-to-home-screen), single-file vanilla JS, zero build step
 - Entire intelligent layer costs < ¥10/month (DeepSeek API); total deployment fits on a 2C2G HK VPS

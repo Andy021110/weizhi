@@ -517,6 +517,10 @@
   .qc-detail .qc-dl { margin: 8px 0 0; }
   .qc-detail .qc-dl-h { font-weight: 700; color: var(--text-1); font-size: 11px; margin-bottom: 2px; }
   .qc-detail-loading { color: var(--text-3); padding: 6px 0; }
+  .dash-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .dash-table td { padding: 7px 4px; border-bottom: 1px dashed var(--line); color: var(--text-1); vertical-align: middle; }
+  .dash-table td.dash-date { color: var(--text-3); width: 44px; font-size: 11px; }
+  .dash-table td.dash-change { color: var(--text-2); }
   .qc-summary { margin-top: 10px; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; font-size: 12px; }
   .qc-sum-row { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
   .qc-sum-row:last-child { margin-bottom: 0; }
@@ -2313,45 +2317,103 @@
     }).catch(function () {});
   }
 
+  // ---------- 学习仪表盘（统计页升级版）----------
+  function dashBar(label, value, max, color) {
+    var pct = max ? Math.max(4, Math.round(value / max * 100)) : 0;
+    return '<div style="display:flex;gap:8px;align-items:center;margin-top:5px">' +
+      '<span style="font-size:11px;width:64px;color:var(--text-2);flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(label) + '</span>' +
+      '<div style="flex:1;height:8px;border-radius:4px;background:var(--bg)"><div style="width:' + pct + '%;height:8px;border-radius:4px;background:' + color + '"></div></div>' +
+      '<span style="font-size:11px;color:var(--text-3);width:32px;text-align:right">' + value + '</span></div>';
+  }
+
+  function dashLine(trend) {
+    // trend: [{date, checked, pass_rate, badcases}] → SVG 折线
+    var pts = [], maxW = 300, maxH = 56, pad = 4;
+    trend.forEach(function (t, i) {
+      if (t.pass_rate == null) return;
+      pts.push([pad + i * (maxW / (trend.length - 1)), maxH - pad - t.pass_rate * (maxH - pad * 2)]);
+    });
+    if (pts.length < 2) return '<div style="font-size:12px;color:var(--text-3)">趋势数据积累中</div>';
+    var line = pts.map(function (p) { return p[0] + ',' + p[1]; }).join(' ');
+    var dots = pts.map(function (p) { return '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="2.5" fill="#3D8A5A"/>'; }).join('');
+    var labels = trend.map(function (t) {
+      return '<span style="font-size:10px;color:var(--text-3);flex:1;text-align:center">' + t.date.slice(5) + '</span>';
+    }).join('');
+    return '<div><svg width="100%" height="' + (maxH + 10) + '" viewBox="0 0 ' + maxW + ' ' + (maxH + 10) + '" style="display:block">' +
+      '<polyline points="' + line + '" fill="none" stroke="#3D8A5A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' + dots + '</svg>' +
+      '<div style="display:flex;margin-top:2px">' + labels + '</div></div>';
+  }
+
   function showStats() {
     state.subView = 'stats';
     $('backBtn').style.display = 'flex';
-    fetchJSON('/api/stats').then(function (data) {
-      var html = '<div class="section"><div class="section-title">学习统计</div><div class="stat-grid">' +
-        '<div class="stat-cell"><div class="stat-cell-num">' + (data.total_cards || 0) + '</div><div class="stat-cell-label">总卡片</div></div>' +
-        '<div class="stat-cell"><div class="stat-cell-num">' + (data.total_done || 0) + '</div><div class="stat-cell-label">已学卡</div></div>' +
-        '<div class="stat-cell"><div class="stat-cell-num">' + (data.reviewing || 0) + '</div><div class="stat-cell-label">复习中</div></div>' +
-        '<div class="stat-cell"><div class="stat-cell-num">' + (data.mastered || 0) + '</div><div class="stat-cell-label">已掌握</div></div>' +
-        '<div class="stat-cell"><div class="stat-cell-num">' + (data.total_reviews || 0) + '</div><div class="stat-cell-label">累计复习</div></div>' +
-        '<div class="stat-cell"><div class="stat-cell-num">' + (ws.streak || 0) + '</div><div class="stat-cell-label">连击天数</div></div>' +
-        '</div></div>';
+    fetchJSON('/api/dashboard').then(function (d) {
+      var s = d.stats || {}, q = d.quality || {}, pf = d.profile || {}, repairs = d.repairs || [];
+      var acc = pf.accuracy != null ? Math.round(pf.accuracy * 100) + '%' : '-';
+      // 1. 知识概览
+      var html = '<div class="section"><div class="section-title">知识概览</div><div class="stat-grid">' +
+        '<div class="stat-cell"><div class="stat-cell-num">' + (s.total_cards || 0) + '</div><div class="stat-cell-label">总卡片</div></div>' +
+        '<div class="stat-cell"><div class="stat-cell-num">' + (s.total_done || 0) + '</div><div class="stat-cell-label">已学</div></div>' +
+        '<div class="stat-cell"><div class="stat-cell-num">' + (s.mastered || 0) + '</div><div class="stat-cell-label">已掌握</div></div>' +
+        '<div class="stat-cell"><div class="stat-cell-num">' + acc + '</div><div class="stat-cell-label">复习准确率</div></div>' +
+        '</div>';
+      var tpls = d.template_dist || [];
+      if (tpls.length) {
+        var tmax = tpls[0].count;
+        html += '<div style="margin:12px 0 2px;font-size:12px;color:var(--text-3)">模板分布</div>' +
+          tpls.map(function (t) { return dashBar(t.name, t.count, tmax, '#3D8A5A'); }).join('');
+      }
+      html += '</div>';
+      // 2. 质量趋势
+      var trend = q.trend || [];
+      html += '<div class="section" style="margin-top:14px"><div class="section-title">质量趋势' +
+        (q.pass_rate != null ? ' · 今日通过率 ' + Math.round(q.pass_rate * 100) + '%' : '') + '</div>';
+      html += trend.length > 1 ? dashLine(trend) : '<div style="font-size:12px;color:var(--text-3)">数据积累中（每天 3:30 巡检后更新）</div>';
+      var issues = q.issues || [];
+      if (issues.length) {
+        var imax = issues[0][1];
+        html += '<div style="margin:12px 0 2px;font-size:12px;color:var(--text-3)">本周问题类型 Top</div>' +
+          issues.slice(0, 4).map(function (x) { return dashBar(x[0], x[1], imax, '#D85A30'); }).join('');
+      }
+      if (q.repair && q.repair.total) {
+        html += '<div style="margin-top:10px;font-size:12px;color:var(--text-3)">自动修复 ' + q.repair.ok + '/' + q.repair.total + ' 成功' +
+          (q.repair.rate != null ? '（' + Math.round(q.repair.rate * 100) + '%）' : '') + '</div>';
+      }
+      html += '</div>';
+      // 3. 学习画像
+      var topics = pf.topics || [];
+      html += '<div class="section" style="margin-top:14px"><div class="section-title">学习画像</div>';
+      html += '<div style="margin-bottom:6px;font-size:12px;color:var(--text-3)">兴趣主题</div>' +
+        (topics.length ? topics.map(function (t) { return '<span class="badge badge-cat">' + escapeHtml(t) + '</span>'; }).join('')
+          : '<div style="font-size:12px;color:var(--text-3)">待积累（点开卡片越多越准）</div>');
+      var weak = pf.weak || [];
+      html += '<div style="margin:12px 0 4px;font-size:12px;color:var(--text-3)">薄弱卡（记错 ≥2 次）</div>' +
+        (weak.length ? weak.map(function (w) {
+          return '<div style="font-size:12px;color:var(--text-2);padding:6px 0;border-bottom:1px dashed var(--line)">' +
+            escapeHtml((w.title || '').slice(0, 26)) + ' <span style="color:var(--red)">记错 ' + w.again_count + ' 次</span></div>';
+        }).join('') : '<div style="font-size:12px;color:var(--text-3)">暂无薄弱卡，状态良好</div>');
+      html += '</div>';
+      // 4. 修复记录
+      html += '<div class="section" style="margin-top:14px"><div class="section-title">修复记录（近 7 天）</div>';
+      if (repairs.length) {
+        html += '<table class="dash-table"><tbody>' + repairs.map(function (r) {
+          return '<tr><td class="dash-date">' + escapeHtml(r.date.slice(5)) + '</td>' +
+            '<td>' + escapeHtml(r.title) + '</td>' +
+            '<td class="dash-change">' + escapeHtml(r.change) + '</td>' +
+            '<td style="text-align:right"><button class="qc-regen ghost" data-rollback="' + escapeHtml(r.source_url) + '">回滚</button></td></tr>';
+        }).join('') + '</tbody></table>';
+      } else {
+        html += '<div style="font-size:12px;color:var(--text-3)">近 7 天无自动修复</div>';
+      }
+      html += '</div>';
       $('cardList').innerHTML = html;
-      $('countLine').textContent = '统计';
-      // 学习画像（兴趣主题 / 薄弱点 / 准确率）
-      fetchJSON('/api/profile').then(function (pd) {
-        var p = pd.profile || {};
-        var topics = (p.topics || []).map(function (t) { return '<span class="badge badge-cat">' + escapeHtml(t) + '</span>'; }).join('');
-        var weak = (p.weak || []).slice(0, 4).map(function (w) {
-          return '<div style="font-size:12px;color:var(--text-2);padding:5px 0;border-bottom:1px dashed var(--line)">' +
-            escapeHtml((w.title || '').slice(0, 24)) + ' <span style="color:var(--red)">记错 ' + w.again_count + ' 次</span></div>';
-        }).join('') || '<div style="font-size:12px;color:var(--text-3)">暂无薄弱卡，状态良好</div>';
-        var acc = p.accuracy != null ? Math.round(p.accuracy * 100) + '%' : '-';
-        var tplHtml = (p.templates || {});
-        var tplNames = { 't1_vocab': '词汇', 't2_reading': '精读', 't3_math': '数学', 't4_trivia': '通识', 't5_skill': '技能', 't6_code': '代码' };
-        var tplTop = Object.keys(tplHtml).map(function (k) { return [tplNames[k] || k, tplHtml[k]]; })
-          .sort(function (a, b) { return b[1] - a[1]; }).slice(0, 3)
-          .map(function (x) { return x[0] + ' ×' + x[1]; }).join('、') || '待积累';
-        html += '<div class="section" style="margin-top:14px"><div class="section-title">学习画像</div>' +
-          '<div class="stat-grid">' +
-          '<div class="stat-cell"><div class="stat-cell-num" style="font-size:15px">' + (p.total_open || 0) + '</div><div class="stat-cell-label">点开过的卡</div></div>' +
-          '<div class="stat-cell"><div class="stat-cell-num" style="font-size:15px">' + acc + '</div><div class="stat-cell-label">复习准确率</div></div>' +
-          '<div class="stat-cell"><div class="stat-cell-num" style="font-size:15px">' + escapeHtml(tplTop) + '</div><div class="stat-cell-label">偏好类型</div></div>' +
-          '</div>' +
-          '<div style="margin:10px 0 6px;font-size:12px;color:var(--text-3)">兴趣主题</div><div>' + topics + '</div>' +
-          '<div style="margin:12px 0 6px;font-size:12px;color:var(--text-3)">薄弱卡（记错 ≥2 次）</div>' + weak +
-          '</div>';
-        $('cardList').innerHTML = html;
-      }).catch(function () {});
+      $('countLine').textContent = '仪表盘';
+      var rbtns = $('cardList').querySelectorAll('[data-rollback]');
+      for (var i = 0; i < rbtns.length; i++) {
+        rbtns[i].addEventListener('click', function () {
+          rollbackBadcase(this.getAttribute('data-rollback'), this);
+        });
+      }
     }).catch(function () {});
   }
 

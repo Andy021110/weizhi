@@ -54,8 +54,8 @@
 
 | 模块 | 职责边界 |
 |---|---|
-| `reader.py` | HTTP API + 业务编排。生成卡时把输入快照写入 `_gen_input`，供 regen 重建输入；regen 保留 plan_id/plan_index 不脱离原计划 |
-| `db.py` | 全部 SQL 封装：建表、CRUD、统计（画像/兴趣分/合规率/掌握率）、查重（标题归一化 + SimHash 指纹）|
+| `reader.py` | HTTP API + 业务编排。生成卡时把输入快照写入 `_gen_input`，供 regen 重建输入；regen 保留 plan_id/plan_index 不脱离原计划；`/api/dashboard` 聚合统计/模板分布/质量趋势/画像/修复记录 |
+| `db.py` | 全部 SQL 封装：建表、CRUD、统计（画像/兴趣分/合规率/掌握率/模板分布）、查重（标题归一化 + SimHash 指纹）|
 | `pipeline.py` | 抓取管线。`filter_fresh` 增量（seen 指纹保留 300 条）；`_article_sim` 摘要级 SimHash（只算摘要不算标题，避免误杀）；一手域名优先替换转载 |
 | `prompts.py` | 6 类模板 + 权威时效四档 + 类型分类/消歧 prompt。所有模板输出含 published/author/credibility/timeliness 四字段 |
 | `daily_check.py` | 巡检。规则+AI 双通道；AI 打分 temperature=0.2、单卡失败跳过；`_backup_count` 限制同卡修复次数 |

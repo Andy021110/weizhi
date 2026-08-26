@@ -718,6 +718,21 @@ def stats():
     }
 
 
+def template_dist():
+    """模板分布（仪表盘用）：[{template, name, count}]，按数量倒序。"""
+    conn = _conn()
+    try:
+        rows = conn.execute(
+            "SELECT template, COUNT(*) AS n FROM cards WHERE template IS NOT NULL GROUP BY template ORDER BY n DESC"
+        ).fetchall()
+    finally:
+        conn.close()
+    names = {"t1_vocab": "词汇", "t2_reading": "精读", "t3_math": "数学",
+             "t4_trivia": "通识", "t5_skill": "技能", "t6_code": "代码"}
+    return [{"template": r["template"], "name": names.get(r["template"], r["template"]),
+             "count": r["n"]} for r in rows]
+
+
 # ===== 质量巡检 M1：daily_check.py / /api/regen / /api/report 用 =====
 
 def get_card(source_url):
