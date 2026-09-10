@@ -107,6 +107,24 @@ CREATE TABLE IF NOT EXISTS v2_claims (
   usable INTEGER DEFAULT 1,
   meta TEXT               -- JSON 字符串
 );
+
+CREATE TABLE IF NOT EXISTS v2_model_calls (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts TEXT,
+  task TEXT,
+  provider TEXT,
+  model TEXT,
+  prompt_version TEXT,
+  input_hash TEXT,        -- 幂等键：同 hash 命中缓存，不重复调用
+  output TEXT,
+  latency_ms INTEGER,
+  prompt_tokens INTEGER,
+  completion_tokens INTEGER,
+  cost REAL,              -- 未配置单价时为 NULL，不猜价格
+  retries INTEGER DEFAULT 0,
+  error TEXT,
+  cached INTEGER DEFAULT 0
+);
 """
 
 
@@ -1321,3 +1339,64 @@ def count_v2_claims(source_id):
     finally:
         conn.close()
     return row[0] if row else 0
+
+
+# ============================================================
+# v2 侧轨：模型调用审计（CP2）
+#
+# 方案 4.3 要求每次调用都留下 provider / model / prompt_version / input_hash /
+# 输出 / 耗时 / 费用 / 重试 / 错误。input_hash 同时是幂等缓存键——
+# 同 hash 命中即复用，不重复收费也不生成重复版本。
+# ============================================================
+
+def save_v2_model_call(task, provider, model, prompt_version, input_hash,
+                       output=None, latency_ms=None, prompt_tokens=None,
+                       completion_tokens=None, cost=None, retries=0,
+                       error=None, cached=0):
+    """记录一次模型调用（成功/失败/缓存命中都记），返回 id。"""
+    conn = _conn()
+    try:
+        cur = conn.execute(
+            "INSERT INTO v2_model_calls (ts, task, provider, model, prompt_version, "
+            "input_hash, output, latency_ms, prompt_tokens, completion_tokens, cost, "
+            "retries, error, cached) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (datetime.now().isoformat(timespec="seconds"), task, provider, model,
+             prompt_version, input_hash, output, latency_ms, prompt_tokens,
+             completion_tokens, cost, retries, error, 1 if cached else 0),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def find_v2_model_call(input_hash):
+    """按幂等键找一条可复用的成功记录。缓存命中行自身不算可复用源。"""
+    conn = _conn()
+    try:
+        row = conn.execute(
+            "SELECT * FROM v2_model_calls WHERE input_hash = ? AND error IS NULL "
+            "AND cached = 0 ORDER BY id DESC LIMIT 1",
+            (input_hash,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return dict(row) if row else None
+
+
+def recent_v2_model_calls(limit=50, task=None):
+    """最近调用记录，倒序。"""
+    conn = _conn()
+    try:
+        if task:
+            rows = conn.execute(
+                "SELECT * FROM v2_model_calls WHERE task = ? ORDER BY id DESC LIMIT ?",
+                (task, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM v2_model_calls ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+    finally:
+        conn.close()
+    return [dict(r) for r in rows]
