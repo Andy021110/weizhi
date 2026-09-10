@@ -54,6 +54,39 @@ DIMENSIONS = [
     ("阅读负荷", "5 分 = 很轻；1 分 = 很重。这一项越低越好"),
 ]
 
+# 每项的 1/3/5 分长什么样。没有锚点的话，不同人（或不同天的同一个人）
+# 打出来的分不可比，三个人的盲评也汇总不出结论。
+ANCHORS = {
+    "事实准确": {
+        5: "每个事实都能在材料里定位到，数字、日期、版本一个不差",
+        3: "主体准确，但有 1-2 处无法追溯、或数字/限定条件对不上",
+        1: "出现编造的数字或日期，或把 A 的说法安到 B 头上",
+    },
+    "解释深度": {
+        5: "是什么、为什么、怎么用都讲清了，读之前不懂、读完能给别人讲",
+        3: "讲清了是什么，但「为什么是这样」讲得浅或跳过了",
+        1: "基本是原文复述或摘要，没增加理解",
+    },
+    "同质化": {
+        5: "组织方式明显是为这份材料设计的，换一篇文章就不成立",
+        3: "结构是通用的，但内容还算贴着这份材料",
+        1: "套话连篇，把材料名换掉照样能读",
+    },
+    "迁移价值": {
+        5: "读完能用到另一个场景，迁移任务是原文没出现过的新场景",
+        3: "能复述结论，但换个场景就不知道怎么用了",
+        1: "只能记住原文说了什么，迁移任务是原文例子换皮",
+    },
+    "阅读负荷": {
+        5: "很轻，5 分钟内读完且不费劲",
+        3: "中等，需要集中注意力，约 8 分钟",
+        1: "很重，读不完或读得很吃力",
+    },
+}
+
+# 判定门槛：差值多少算「显著提高」。方案只说「显著」，这里给个可执行口径。
+MIN_GAIN = 1.0
+
 DEMO_MATERIALS = [
     {
         "title": "Agent Harness 的执行循环",
@@ -297,36 +330,67 @@ def render_blind_md(blinded, seed, provider_kind="fake"):
 
 
 def render_score_md(blinded, seed):
-    header = "| 组 | 材料 | 版本 | " + " | ".join(d for d, _ in DIMENSIONS) + " | 一句话理由 |"
-    sep = "|---|---|---|" + "---|" * (len(DIMENSIONS) + 1)
+    cols = list(DIMENSIONS) + [("教学分小计", "解释+同质化+迁移，满分 15")]
+    header = "| 组 | 材料 | 版本 | " + " | ".join(d for d, _ in cols) + " | 一句话理由 |"
+    sep = "|---|---|---|" + "---|" * (len(cols) + 1)
     rows = [header, sep]
     for item in blinded:
         for label in ("A", "B"):
-            rows.append("| %d | %s | %s | " % (item["idx"], item["material"], label)
-                        + " | ".join("" for _ in DIMENSIONS) + " |  |")
+            # 标题里常带竖线（「xxx | 选自 yyy」），不转义会串列
+            title = str(item["material"]).replace("|", "\\|")
+            rows.append("| %d | %s | %s | " % (item["idx"], title, label)
+                        + " | ".join("" for _ in cols) + " |  |")
     out = [
         "# 评分表（M1 A/B）",
         "",
-        "> 随机种子：%s（答案见同目录 answers.json，评完分再揭盲）" % seed,
+        "> 随机种子：%s（答案见同目录 answers.json，**评完分再揭盲**）" % seed,
         ">",
-        "> 每项 1-5 分。**阅读负荷越低越好**（5=很轻，1=很重），其余越高越好。",
+        "> 每项 1-5 分。**阅读负荷是反向指标**（5=很轻，1=很重），其余越高越好。",
+        "> 打分锚点见下方「打分锚点」表，别凭感觉打。",
         "",
     ]
     out.extend(rows)
     out.append("")
-    out.append("## 维度说明")
+    out.append("## 打分锚点")
     out.append("")
-    for name, desc in DIMENSIONS:
-        out.append("- **%s**：%s" % (name, desc))
+    out.append("每项 1-5 分，只写 1/3/5 这三个档；觉得在两档之间就写 2 或 4。")
     out.append("")
-    out.append("## 判定规则（方案第 11 节）")
+    out.append("| 维度 | 1 分 | 3 分 | 5 分 |")
+    out.append("|---|---|---|---|")
+    for name, _desc in DIMENSIONS:
+        a = ANCHORS[name]
+        out.append("| **%s**%s | %s | %s | %s |" % (
+            name,
+            "（反向）" if name == "阅读负荷" else "",
+            a[1], a[3], a[5],
+        ))
     out.append("")
-    out.append("只有当模型版满足以下两条，才进入 M2/M3：")
+    out.append("## 汇总与判定")
     out.append("")
-    out.append("1. **事实准确不低于规则版**（新方案不能为了好读而牺牲事实质量）；")
-    out.append("2. **解释深度 / 同质化 / 迁移价值的均分显著高于规则版。**")
+    out.append("先算出每个版本的两项汇总分（同一材料内比较）：")
     out.append("")
-    out.append("否则回到 M1 内部调提示词与门禁阈值，不要进入 M2。")
+    out.append("- **教学分** = 解释深度 + 同质化 + 迁移价值 → 满分 15，越高越好")
+    out.append("- **阅读负荷**单独看 → 越低越好（5=很轻，1=很重）")
+    out.append("- **事实准确**是**一票否决项**，不参与求平均")
+    out.append("")
+    out.append("### 进入 M2/M3 的条件（三条全满足）")
+    out.append("")
+    out.append("1. 模型版 **事实准确 ≥ 规则版**（新方案不能为了好读牺牲事实质量）；")
+    out.append("2. 模型版 **教学分 − 规则版教学分 ≥ %.1f**（满分 15，即平均每项至少高 %.1f）；"
+               % (MIN_GAIN * 3, MIN_GAIN))
+    out.append("3. 模型版 **阅读负荷 ≥ 规则版**（负荷分越高越轻，即不能更累）。")
+    out.append("")
+    out.append("任一条件不满足 → 回到 M1 内部调提示词与门禁阈值，不要进入 M2。")
+    out.append("")
+    out.append("## 理由要不要写")
+    out.append("")
+    out.append("一句话理由**建议写，但不强求**。只在三种情况下**必须写**：")
+    out.append("")
+    out.append("1. 打了 1 分或 2 分——不写清哪里坏了，后面没法改；")
+    out.append("2. 打了 5 分——说清好在哪，才知道该保留什么；")
+    out.append("3. **同质化**和**迁移价值**这两项主观性最强，建议无论如何写一句。")
+    out.append("")
+    out.append("中间分（3-4 分）可以只打分不写理由。")
     return "\n".join(out)
 
 

@@ -63,8 +63,24 @@ def test_score_sheet_covers_all_dimensions():
     md = eval_ab.render_score_md(blinded, 1)
     for name, _ in eval_ab.DIMENSIONS:
         assert name in md
-    assert "阅读负荷越低越好" in md, "阅读负荷是反向指标，必须写清否则会被评反"
-    assert "判定规则" in md
+    assert "阅读负荷" in md and "反向指标" in md, "阅读负荷是反向指标，必须写清否则会被评反"
+    assert "进入 M2/M3 的条件" in md, "判定门槛必须写在表里，否则评完不知道怎么决断"
+
+
+def test_score_sheet_has_anchors_for_every_dimension():
+    """没有锚点的 1-5 分不可比，不同人打分汇不出结论。"""
+    for name, _ in eval_ab.DIMENSIONS:
+        assert name in eval_ab.ANCHORS, "缺锚点: %s" % name
+        a = eval_ab.ANCHORS[name]
+        assert set(a) == {1, 3, 5}, "%s 的锚点应覆盖 1/3/5" % name
+        assert all(a[k] for k in (1, 3, 5))
+
+    blinded = eval_ab.blind_pairs(
+        [{"material": "m", "rule": {"version": "rule"}, "model": {"version": "model"}}], seed=1)
+    md = eval_ab.render_score_md(blinded, 1)
+    assert "打分锚点" in md
+    assert "教学分小计" in md, "要给人一个可算的汇总口径"
+    assert eval_ab.MIN_GAIN > 0
 
 
 def test_blind_md_warns_when_using_fake_provider():
