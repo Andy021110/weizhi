@@ -80,6 +80,33 @@ CREATE TABLE IF NOT EXISTS notifications (
   read INTEGER DEFAULT 0,
   created_at TEXT
 );
+
+-- ===== 以下为 v2 侧轨表（M1 起）。与 v1 表零耦合，删表即回滚 =====
+
+CREATE TABLE IF NOT EXISTS v2_sources (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  url TEXT UNIQUE,
+  title TEXT,
+  site TEXT,
+  lang TEXT,
+  content_hash TEXT,      -- 清洗后文本哈希，用于快照去重与变更检测
+  snapshot_path TEXT,
+  clean_text TEXT,
+  fetched_at TEXT,
+  meta TEXT               -- JSON 字符串
+);
+
+CREATE TABLE IF NOT EXISTS v2_claims (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_id INTEGER,
+  claim_idx INTEGER,
+  text TEXT,
+  start INTEGER,          -- 在 clean_text 中的偏移，保证 text == clean[start:end]
+  end INTEGER,
+  kind TEXT,              -- fact / number / definition / step
+  usable INTEGER DEFAULT 1,
+  meta TEXT               -- JSON 字符串
+);
 """
 
 
@@ -1199,3 +1226,98 @@ def mark_notifications_read(ids=None):
         conn.commit()
     finally:
         conn.close()
+
+
+# ============================================================
+# v2 侧轨：信源与证据（CP1）
+#
+# 与 v1 表零耦合。v2_sources 保存清洗后正文，v2_claims 保存可回溯到
+# 原文的证据片段——start/end 是相对 clean_text 的偏移，任何时候都能用
+# clean_text[start:end] 原样取回，这是「证据可追溯」的硬性保证。
+# ============================================================
+
+def save_v2_source(url, title=None, site=None, lang=None, content_hash=None,
+                   clean_text=None, snapshot_path=None, meta=None):
+    """写入/更新一个 v2 信源，返回 source id。同 url 视为同一信源。"""
+    conn = _conn()
+    try:
+        row = conn.execute("SELECT id FROM v2_sources WHERE url = ?", (url,)).fetchone()
+        if row:
+            conn.execute(
+                "UPDATE v2_sources SET title=?, site=?, lang=?, content_hash=?, "
+                "clean_text=?, snapshot_path=?, meta=? WHERE id=?",
+                (title, site, lang, content_hash, clean_text, snapshot_path, _dump(meta), row["id"]),
+            )
+            conn.commit()
+            return row["id"]
+        cur = conn.execute(
+            "INSERT INTO v2_sources (url, title, site, lang, content_hash, clean_text, "
+            "snapshot_path, fetched_at, meta) VALUES (?,?,?,?,?,?,?,?,?)",
+            (url, title, site, lang, content_hash, clean_text, snapshot_path,
+             datetime.now().isoformat(timespec="seconds"), _dump(meta)),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def get_v2_source(url):
+    """按 url 取信源，没有则 None。"""
+    conn = _conn()
+    try:
+        row = conn.execute("SELECT * FROM v2_sources WHERE url = ?", (url,)).fetchone()
+    finally:
+        conn.close()
+    return dict(row) if row else None
+
+
+def save_v2_claims(source_id, claims):
+    """批量写入一个信源的证据片段。同 source_id 先清后写，保证重跑不累积。"""
+    conn = _conn()
+    try:
+        conn.execute("DELETE FROM v2_claims WHERE source_id = ?", (source_id,))
+        conn.executemany(
+            "INSERT INTO v2_claims (source_id, claim_idx, text, start, end, kind, usable, meta) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            [
+                (source_id, c.get("claim_idx", i), c["text"], c["start"], c["end"],
+                 c.get("kind", "fact"), 1 if c.get("usable", True) else 0, _dump(c.get("meta")))
+                for i, c in enumerate(claims)
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def load_v2_claims(source_id, usable_only=False):
+    """取某信源的证据片段，按 claim_idx 排序。"""
+    conn = _conn()
+    try:
+        sql = "SELECT * FROM v2_claims WHERE source_id = ?"
+        if usable_only:
+            sql += " AND usable = 1"
+        rows = conn.execute(sql + " ORDER BY claim_idx", (source_id,)).fetchall()
+    finally:
+        conn.close()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["meta"] = _load(d.get("meta"))
+        d["usable"] = bool(d.get("usable"))
+        out.append(d)
+    return out
+
+
+def count_v2_claims(source_id):
+    """某信源可用证据数。方案 3.1 要求「至少两条相关核验证据」才允许规划学习包。"""
+    conn = _conn()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM v2_claims WHERE source_id = ? AND usable = 1",
+            (source_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return row[0] if row else 0
