@@ -104,3 +104,52 @@ def test_ingest_and_plan_gate(tmp_db):
 def db_claim_count(sid):
     import db
     return db.count_v2_claims(sid)
+
+
+def test_select_claims_caps_prompt_size():
+    """1.7 万字的文章会抽出几百条证据，不设上限 prompt 会爆。"""
+    many = [{"claim_idx": i, "text": "第 %d 条关于 Agent 循环机制的证据说明内容足够长。" % i,
+             "kind": "fact"} for i in range(200)]
+    picked = evidence.select_claims(many, limit=24)
+    assert len(picked) <= 24
+    assert len(picked) >= evidence.MIN_CLAIMS_FOR_PACK
+
+
+def test_select_claims_keeps_original_order():
+    """选完要排回原文顺序，否则模型产出的卡片逻辑是乱的。"""
+    many = [{"claim_idx": i, "text": "证据内容 %d，长度足够通过筛选条件。" % i, "kind": "fact"}
+            for i in range(30)]
+    picked = evidence.select_claims(many, limit=10)
+    idxs = [c["claim_idx"] for c in picked]
+    assert idxs == sorted(idxs)
+
+
+def test_select_claims_prefers_informative_kinds():
+    claims = [
+        {"claim_idx": 0, "text": "一句普通陈述，长度足够通过筛选条件。", "kind": "fact"},
+        {"claim_idx": 1, "text": "该框架在 2025 年评测中准确率达到 87.5%。", "kind": "number"},
+        {"claim_idx": 2, "text": "Agent Harness 是指一种执行框架。", "kind": "definition"},
+    ] + [{"claim_idx": i + 3, "text": "填充用的普通陈述内容，长度足够通过筛选。" % (),
+          "kind": "fact"} for i in range(20)]
+    picked = evidence.select_claims(claims, limit=2)
+    kinds = {c["kind"] for c in picked}
+    assert kinds <= {"number", "definition"}, "信息量高的证据应优先入选，实际: %s" % kinds
+
+
+def test_select_claims_dedupes_near_identical():
+    dup = [
+        {"claim_idx": 0, "text": "核心循环由上下文组装与状态回写两个阶段共同组成，缺一不可。", "kind": "fact"},
+        {"claim_idx": 1, "text": "核心循环由上下文组装与状态回写两个阶段共同组成，缺一不可。", "kind": "fact"},
+    ]
+    picked = evidence.select_claims(dup, limit=10)
+    assert len(picked) == 1
+
+
+def test_select_claims_uses_goal_terms():
+    goal = {"capability": "能说清电商智能体的分层结构", "scene": "", "success_evidence": ""}
+    claims = [
+        {"claim_idx": 0, "text": "天气预报告诉我们明天下雨的概率比较大，出门记得带伞。", "kind": "fact"},
+        {"claim_idx": 1, "text": "电商智能体在架构上分为接入层、编排层与工具层三个层次。", "kind": "definition"},
+    ]
+    picked = evidence.select_claims(claims, goal, limit=1)
+    assert "电商智能体" in picked[0]["text"]

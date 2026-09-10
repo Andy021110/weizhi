@@ -5,6 +5,7 @@ import pytest
 
 import card_gates
 import db
+import schema_v2
 from card_writer import promote_to_candidate, write_card_gated
 from conftest import make_claims, make_draft, make_v2_goal
 from providers import FakeTextProvider
@@ -190,3 +191,38 @@ def _goal():
 
 def db_row(draft_id):
     return db.get_v2_card_draft_by_id(draft_id)
+
+
+def test_english_month_name_does_not_false_positive():
+    """英文材料写 September 8, 2026，模型译成「2026 年 9 月 8 日」是正确的，
+    门禁不能因为原文里没有阿拉伯数字 9 就判它编造。"""
+    claims = [{"claim_idx": 0, "kind": "fact",
+               "text": "The ranking is current as of September 8, 2026 on GIFT-Eval."}]
+    draft = make_draft()
+    draft["boundaries"] = [
+        {"text": "该排名截至 2026 年 9 月 8 日在 GIFT-Eval 上成立，脱离限定条件谈排名会失真。",
+         "cites": [0]},
+    ]
+    assert card_gates.check_number_consistency(draft, claims) == []
+
+
+def test_really_fabricated_number_still_caught_after_normalization():
+    """归一化不能把真正的编造也放过去。"""
+    claims = [{"claim_idx": 0, "kind": "fact",
+               "text": "The ranking is current as of September 8, 2026 on GIFT-Eval."}]
+    draft = make_draft()
+    draft["boundaries"] = [
+        {"text": "该排名截至 2026 年 9 月 18 日成立，准确率达到 99.2%。", "cites": [0]},
+    ]
+    issues = card_gates.check_number_consistency(draft, claims)
+    assert any("99.2" in d for _t, d in issues)
+
+
+def test_too_many_blocks_is_rejected_by_schema():
+    """13 段那是文章不是卡。"""
+    draft = make_draft()
+    draft["explanation"] = [
+        {"text": "第 %d 段解释内容，长度足够通过最短限制。" % i, "cites": [0]} for i in range(6)
+    ]
+    errs = schema_v2.validate_card_draft(draft)
+    assert any("一张卡不是一篇文章" in e for e in errs)

@@ -55,11 +55,12 @@ def check_number_consistency(draft, claims=None):
     真要核验的是模型有没有编造「87.5%」「2025 年 3 月」这类硬数字。
     """
     issues = []
-    texts = _claim_text(claims)
+    texts = {k: schema_v2.normalize_numbers(v) for k, v in _claim_text(claims).items()}
     for kind, block in schema_v2.iter_blocks(draft):
         cited = "\n".join(texts.get(c, "") for c in (block.get("cites") or []))
         if not cited:
             continue  # 无引用由引用覆盖门禁负责，这里不重复报
+        cited = schema_v2.normalize_numbers(cited)
         for num in schema_v2.NUMBER_RE.findall(block.get("text") or ""):
             if num not in cited:
                 issues.append((

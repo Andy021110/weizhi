@@ -240,6 +240,89 @@ def ingest_source(url, raw, title=None, site=None, lang=None, snapshot_path=None
     return source_id, claims
 
 
+# Claim Selector 的权重：带数字和定义的事实信息量最高，步骤与一般陈述次之
+_KIND_WEIGHT = {"number": 3, "definition": 3, "fact": 2, "step": 2}
+
+# 太短的片段信息量不足，太长的通常是没切开的长句。
+# 下限设 15 而非 25：带硬数字的短句（「准确率达 87.5%」）恰恰是最该保留的证据。
+_MIN_CLAIM_LEN = 15
+_MAX_CLAIM_LEN = 200
+
+_DEFAULT_MAX_CLAIMS = 24
+
+
+def _norm_for_dedupe(text):
+    return re.sub(r"[\s，。、；：（）()\[\]【】,.;:!！?？\"'“”‘’]", "", (text or "").lower())
+
+
+def _relevance(claim, terms):
+    """与学习目标的重合度：用字符二元组算，不引入分词依赖。"""
+    if not terms:
+        return 0
+    text = claim.get("text") or ""
+    hit = sum(1 for t in terms if t in text)
+    return min(hit, 3)
+
+
+# 含这些字的 n-gram 没有区分度（「能说清」「的分层」这类），直接丢掉
+_TERM_STOP_CHARS = set("的了和与是在我有能说清判断自己项目场景适用边界完成复述要会可对把被让")
+
+
+def _goal_terms(goal):
+    """从 GoalSpec 抽出用于相关性打分的关键词。
+
+    用滑动窗口取 3-gram / 2-gram，而不是贪婪切 2-4 字——后者会把
+    「能说清电商智能体」切成「能说清电|商智能体」，两个都对不上原文。
+    """
+    if not goal:
+        return []
+    raw = " ".join(str(goal.get(k) or "") for k in ("capability", "scene", "success_evidence"))
+    terms = []
+    for chunk in re.findall(r"[\u4e00-\u9fff]{2,}", raw):
+        for n in (3, 2):
+            for i in range(len(chunk) - n + 1):
+                gram = chunk[i:i + n]
+                if not (set(gram) & _TERM_STOP_CHARS):
+                    terms.append(gram)
+    # 长词优先（3-gram 比 2-gram 更有区分度），同长度保持原顺序
+    terms.sort(key=lambda t: -len(t))
+    return list(dict.fromkeys(terms))[:15]
+
+
+def select_claims(claims, goal=None, limit=_DEFAULT_MAX_CLAIMS):
+    """从候选证据里挑最值得学的若干条，把 prompt 控制在可承受范围。
+
+    为什么必须有这一步：一篇 1.7 万字的文章会抽出 385 条证据，全塞进 prompt
+    既不经济（方案 2.4 要求成本适合单用户自托管），也会让模型试图覆盖全部内容，
+    把一张卡写成一篇综述。方案 4.2 把「判断哪些证据值得学」交给 Claim Selector，
+    M1 阶段先用确定性规则选候选集，语义判断留到 M2。
+
+    选完按 claim_idx 排回原文顺序——打乱顺序会让模型产出逻辑混乱的卡片。
+    """
+    terms = _goal_terms(goal)
+    scored = []
+    seen = set()
+    for c in claims or []:
+        if not c.get("usable", True):
+            continue
+        text = (c.get("text") or "").strip()
+        if not (_MIN_CLAIM_LEN <= len(text) <= _MAX_CLAIM_LEN):
+            continue
+        key = _norm_for_dedupe(text)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        score = _KIND_WEIGHT.get(c.get("kind"), 1) * 2 + _relevance(c, terms)
+        scored.append((score, c))
+
+    scored.sort(key=lambda x: (-x[0], x[1].get("claim_idx", 0)))
+    # 尊重调用方给定的 limit。是否够组成一个学习包由调用方判断
+    # （write_card 会用 MIN_CLAIMS_FOR_PACK 拦），这里不替它做决定。
+    picked = [c for _s, c in scored[:limit]]
+    picked.sort(key=lambda c: c.get("claim_idx", 0))
+    return picked
+
+
 def can_plan_pack(source_id):
     """是否满足「至少两条可用证据」的规划前置条件（方案 3.1）。"""
     return db.count_v2_claims(source_id) >= MIN_CLAIMS_FOR_PACK

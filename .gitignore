@@ -23,6 +23,7 @@ backups/
 
 # ===== A/B 评测产物（盲评材料与评分表不入库）=====
 eval_out/
+eval_materials.json
 
 # ===== 个人面试材料（不入公开仓）=====
 docs/面试口述稿.md

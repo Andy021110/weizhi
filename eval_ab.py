@@ -21,6 +21,12 @@
 
     [{"title": "Hugging Face 文本生成教程", "url": "https://...", "text": "原文..."}]
 
+可选按材料指定学习目标，让「一目标一卡」成立（不填则用通用目标）::
+
+    [{"title": "...", "url": "...", "text": "...",
+      "capability": "能说清 X 的机制", "scene": "在 Y 场景下判断要不要用",
+      "success_evidence": "能不查资料复述并说出一个不适用场景"}]
+
 已知局限（必须看清再用结论）：
 默认用 FakeTextProvider，模型版的结构合规但**内容是合成的**，只能验证脚手架
 是否跑通，不能用来判断教学价值。真实结论必须用 `--provider deepseek` 跑真模型。
@@ -37,7 +43,7 @@ import card_writer
 import db
 import evidence
 import schema_v2
-from providers import FakeTextProvider, ProviderError
+from providers import DeepSeekProvider, FakeTextProvider, ProviderError
 
 # 方案 11 的盲评维度。前四项越高越好，阅读负荷单独看（越低越好）。
 DIMENSIONS = [
@@ -100,6 +106,49 @@ def rule_version(claims, material):
     }
 
 
+def rule_version_v1(v1_provider, material, clean_text):
+    """v1 真实基线：整篇正文 + T2 精读模板 → 模型出卡。
+
+    这才是方案 11 说的「当前规则版」——v1 也调用了模型，只是它把整篇正文
+    丢给模型让它自己找重点，事实无法回溯。用「原文拼接」当基线是不公平的：
+    那是在拿无模型方案和有模型方案比，会人为抬高模型版。
+    """
+    raw = v1_provider.generate_json(
+        "t2_reading",
+        {"required": ["title", "summary", "body", "core_points"]},
+        {
+            "source": material.get("site") or material.get("title") or "未标注来源",
+            "title": material.get("title") or "",
+            "content": clean_text[:8000],
+            "url": material.get("url") or "",
+        },
+    )
+    return {
+        "version": "rule",
+        "baseline": "v1-t2-template",
+        "title": raw.get("title", ""),
+        "objective": "",
+        "lead": raw.get("summary", ""),
+        "body": raw.get("body", ""),
+        "key_points": raw.get("core_points") or [],
+        "transfer_task": "",
+        "cites": [],
+    }
+
+
+class _V1T2Provider(DeepSeekProvider):
+    """复用 v1 的 T2 精读模板，只借 DeepSeekProvider 的调用与审计能力。"""
+
+    name = "deepseek-v1-t2"
+
+    def build_messages(self, task, inputs):
+        from prompts import T2_SYSTEM, T2_USER
+        return [
+            {"role": "system", "content": T2_SYSTEM},
+            {"role": "user", "content": T2_USER.format(**inputs)},
+        ]
+
+
 def model_version(provider, goal, claims, material, source_id):
     """模型版（v2）：证据约束的教学重写，带质量门禁。"""
     try:
@@ -131,8 +180,28 @@ def model_version(provider, goal, claims, material, source_id):
     }
 
 
-def build_pair(material, goal, provider):
-    """对一份材料产出 (规则版, 模型版)。"""
+def build_goal(material):
+    """为一份材料构造 GoalSpec。材料自带 capability 时优先用它——
+    三篇不同文章共用一个泛化目标，产出的卡片也会一样泛。"""
+    return schema_v2.make_goal(
+        key="ab-eval",
+        capability=material.get("capability") or "能说清材料讲的核心机制，并判断它适用到什么边界",
+        level=material.get("level") or "有基础但不系统",
+        scene=material.get("scene") or "读完能在自己的项目里判断要不要用",
+        success_evidence=material.get("success_evidence")
+        or "能不查资料复述核心机制并说出一个不适用场景",
+        prereq=material.get("prereq") or [],
+        milestones=material.get("milestones") or [],
+        daily_minutes=60,
+    )
+
+
+def build_pair(material, goal, provider, v1_provider=None):
+    """对一份材料产出 (规则版, 模型版)。
+
+    `v1_provider` 给了就走真实 v1 基线（T2 模板 + 模型），
+    否则退回无模型的原文拼接——后者只能跑通流程，不能用作评判基线。
+    """
     clean = evidence.clean_text(material["text"])
     claims = evidence.extract_claims(clean)
     if len(claims) < evidence.MIN_CLAIMS_FOR_PACK:
@@ -144,11 +213,13 @@ def build_pair(material, goal, provider):
         clean_text=clean,
     )
     db.save_v2_claims(source_id, claims)
+    rule = (rule_version_v1(v1_provider, material, clean) if v1_provider
+            else rule_version(claims, material))
     return {
         "material": material.get("title"),
         "url": material.get("url"),
         "claim_count": len(claims),
-        "rule": rule_version(claims, material),
+        "rule": rule,
         "model": model_version(provider, goal, claims, material, source_id),
     }
 
@@ -267,6 +338,9 @@ def main(argv=None):
     ap.add_argument("--seed", type=int, default=20260910, help="盲评随机编号种子")
     ap.add_argument("--provider", default="fake", choices=["fake", "deepseek"],
                     help="模型版用哪个 Provider；fake 只能验证流程，不能得结论")
+    ap.add_argument("--rule-baseline", default="concat", choices=["concat", "v1"],
+                    help="规则版基线：concat=原文拼接（无模型，仅跑通流程）；"
+                         "v1=真实 v1 基线（T2 模板 + 模型，评判必须用这个）")
     args = ap.parse_args(argv)
 
     if not args.demo and not args.materials:
@@ -279,22 +353,22 @@ def main(argv=None):
         materials = DEMO_MATERIALS
 
     provider = _make_provider(args.provider)
+    v1_provider = None
+    if args.rule_baseline == "v1":
+        if args.provider != "deepseek":
+            ap.error("--rule-baseline v1 需要 --provider deepseek")
+        from providers import DeepSeekProvider
+        import json as _json
+        key = _json.load(open(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "config.json"),
+            encoding="utf-8"))["deepseek_api_key"]
+        v1_provider = _V1T2Provider(api_key=key)
 
     db.init_db()
-    goal = schema_v2.make_goal(
-        key="ab-eval",
-        capability="能说清材料讲的核心机制，并判断它适用到什么边界",
-        level="有基础但不系统",
-        scene="读完能在自己的项目里判断要不要用",
-        success_evidence="能不查资料复述核心机制并说出一个不适用场景",
-        prereq=["基本编程"],
-        milestones=["复述机制", "举出反例"],
-        daily_minutes=60,
-    )
 
     pairs, skipped = [], []
     for m in materials:
-        pair = build_pair(m, goal, provider)
+        pair = build_pair(m, build_goal(m), provider, v1_provider)
         (pairs if pair else skipped).append(pair or m.get("title"))
 
     blinded = blind_pairs(pairs, args.seed)

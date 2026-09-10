@@ -73,8 +73,15 @@ def _make_validator(claims):
     return validate
 
 
+def _prepare_claims(goal, claims, max_claims):
+    """过滤 + 选取要喂给模型的证据。证据太多时模型会把一张卡写成综述。"""
+    usable = [c for c in (claims or []) if c.get("usable", True)]
+    return evidence.select_claims(usable, goal, limit=max_claims)
+
+
 def write_card(provider, goal, claims, source=None, source_id=None,
-               objective=None, prompt_version=None):
+               objective=None, prompt_version=None,
+               max_claims=evidence._DEFAULT_MAX_CLAIMS):
     """生成一份 CardDraft 并落库。返回 (draft, draft_id)。
 
     抛 ValueError：GoalSpec 不合法或证据不足——这是**输入问题**，重试没有意义。
@@ -84,7 +91,7 @@ def write_card(provider, goal, claims, source=None, source_id=None,
     if errs:
         raise ValueError("GoalSpec 不合法: " + "；".join(errs))
 
-    claims = [c for c in (claims or []) if c.get("usable", True)]
+    claims = _prepare_claims(goal, claims, max_claims)
     if len(claims) < evidence.MIN_CLAIMS_FOR_PACK:
         raise ValueError(
             "可用证据 %d 条 < %d，不足以规划学习包（方案 3.1）"
@@ -112,7 +119,8 @@ def write_card(provider, goal, claims, source=None, source_id=None,
 
 
 def write_card_gated(provider, goal, claims, source=None, source_id=None,
-                     objective=None, prompt_version=None, max_repair=1):
+                     objective=None, prompt_version=None, max_repair=1,
+                     max_claims=evidence._DEFAULT_MAX_CLAIMS):
     """带质量门禁的卡片生成：失败最多修复一次，仍不合格则 rejected 且不成为候选包。
 
     返回 (draft, draft_id, report)。
@@ -126,7 +134,7 @@ def write_card_gated(provider, goal, claims, source=None, source_id=None,
     if errs:
         raise ValueError("GoalSpec 不合法: " + "；".join(errs))
 
-    claims = [c for c in (claims or []) if c.get("usable", True)]
+    claims = _prepare_claims(goal, claims, max_claims)
     if len(claims) < evidence.MIN_CLAIMS_FOR_PACK:
         raise ValueError(
             "可用证据 %d 条 < %d，不足以规划学习包（方案 3.1）"

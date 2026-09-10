@@ -63,6 +63,10 @@ def validate_goal_spec(goal):
 
 FACTUAL_KINDS = ("explanation", "examples", "boundaries")
 
+# 段落上限。真实跑通后发现：不设上限时模型会把一张卡写成一篇综述
+# （一次实测写了 13 段 2192 字），那不是「一目标一卡」，是一篇文章。
+MAX_BLOCKS_PER_KIND = {"explanation": 4, "examples": 3, "boundaries": 3}
+
 CARD_DRAFT_SCHEMA = {
     "required": ["schema_version", "objective", "title", "lead", "explanation",
                  "key_points", "transfer_task", "estimated_minutes"],
@@ -123,6 +127,10 @@ def validate_card_draft(draft):
         if not isinstance(blocks, list):
             errs.append("%s 应为数组" % kind)
             continue
+        cap = MAX_BLOCKS_PER_KIND.get(kind)
+        if cap and len(blocks) > cap:
+            errs.append("%s 有 %d 段 > 上限 %d（一张卡不是一篇文章）"
+                        % (kind, len(blocks), cap))
         for i, block in enumerate(blocks):
             if not isinstance(block, dict):
                 errs.append("%s[%d] 不是对象" % (kind, i))
@@ -176,3 +184,22 @@ def body_text(draft):
 
 # 数字：整数、小数、百分数、版本号片段。用于数字一致性门禁。
 NUMBER_RE = re.compile(r"\d+(?:\.\d+)?%?|\d+(?:\.\d+)*")
+
+# 英文月份名 → 数字。没有这一步，英文材料里的 "September 8, 2026" 与
+# 模型译成的「2026 年 9 月 8 日」对不上，门禁会把正确翻译误判为编造。
+_MONTHS = {
+    "jan": "1", "feb": "2", "mar": "3", "apr": "4", "may": "5", "jun": "6",
+    "jul": "7", "aug": "8", "sep": "9", "oct": "10", "nov": "11", "dec": "12",
+}
+_MONTH_RE = re.compile(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b", re.I)
+
+
+def normalize_numbers(text):
+    """归一化数字表达，让中英混排材料的数字可以互相对齐。"""
+    if not text:
+        return ""
+
+    def repl(m):
+        return _MONTHS.get(m.group(1)[:3].lower(), m.group(0))
+
+    return _MONTH_RE.sub(repl, text)
