@@ -125,6 +125,20 @@ CREATE TABLE IF NOT EXISTS v2_model_calls (
   error TEXT,
   cached INTEGER DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS v2_card_drafts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  input_hash TEXT UNIQUE,   -- 同输入不生成重复版本
+  schema_version TEXT,
+  source_id INTEGER,
+  goal_key TEXT,
+  objective TEXT,
+  status TEXT,              -- draft / published / rejected
+  payload TEXT,             -- JSON 字符串
+  gate_report TEXT,         -- JSON 字符串，质量门禁结果
+  created_at TEXT,
+  updated_at TEXT
+);
 """
 
 
@@ -1400,3 +1414,92 @@ def recent_v2_model_calls(limit=50, task=None):
     finally:
         conn.close()
     return [dict(r) for r in rows]
+
+
+# ============================================================
+# v2 侧轨：卡片草稿（CP3）
+#
+# v2 的产出先落 draft，过门禁后才允许成为候选包——这是方案第 7 节
+# 「生产与发布之间需要质量门禁」的落点。input_hash 唯一，同输入不重复建版本。
+# ============================================================
+
+def save_v2_card_draft(input_hash, schema_version, payload, source_id=None,
+                       goal_key=None, objective=None, status="draft", gate_report=None):
+    """写入/更新一份草稿。同 input_hash 视为同一份，返回 id。"""
+    now = datetime.now().isoformat(timespec="seconds")
+    conn = _conn()
+    try:
+        row = conn.execute(
+            "SELECT id FROM v2_card_drafts WHERE input_hash = ?", (input_hash,)
+        ).fetchone()
+        if row:
+            conn.execute(
+                "UPDATE v2_card_drafts SET schema_version=?, payload=?, status=?, "
+                "gate_report=?, objective=?, updated_at=? WHERE id=?",
+                (schema_version, _dump(payload), status, _dump(gate_report),
+                 objective, now, row["id"]),
+            )
+            conn.commit()
+            return row["id"]
+        cur = conn.execute(
+            "INSERT INTO v2_card_drafts (input_hash, schema_version, source_id, goal_key, "
+            "objective, status, payload, gate_report, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (input_hash, schema_version, source_id, goal_key, objective, status,
+             _dump(payload), _dump(gate_report), now, now),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def get_v2_card_draft(input_hash):
+    conn = _conn()
+    try:
+        row = conn.execute(
+            "SELECT * FROM v2_card_drafts WHERE input_hash = ?", (input_hash,)
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return None
+    d = dict(row)
+    d["payload"] = _load(d.get("payload"))
+    d["gate_report"] = _load(d.get("gate_report"))
+    return d
+
+
+def list_v2_card_drafts(status=None, limit=50):
+    conn = _conn()
+    try:
+        if status:
+            rows = conn.execute(
+                "SELECT * FROM v2_card_drafts WHERE status = ? ORDER BY id DESC LIMIT ?",
+                (status, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM v2_card_drafts ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+    finally:
+        conn.close()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["payload"] = _load(d.get("payload"))
+        d["gate_report"] = _load(d.get("gate_report"))
+        out.append(d)
+    return out
+
+
+def set_v2_card_draft_status(draft_id, status, gate_report=None):
+    conn = _conn()
+    try:
+        conn.execute(
+            "UPDATE v2_card_drafts SET status=?, gate_report=?, updated_at=? WHERE id=?",
+            (status, _dump(gate_report), datetime.now().isoformat(timespec="seconds"), draft_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()

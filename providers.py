@@ -189,8 +189,10 @@ class DeepSeekProvider(TextModelProvider):
     def build_messages(self, task, inputs):
         from prompts import V2_PROMPTS
         spec = V2_PROMPTS[task]
+        # system / user 都做格式化：禁用词表这类常量放 system 里更省 token，
+        # 代价是两侧模板里的字面花括号都要写成 {{ }}
         return [
-            {"role": "system", "content": spec["system"]},
+            {"role": "system", "content": spec["system"].format(**inputs)},
             {"role": "user", "content": spec["user"].format(**inputs)},
         ]
 
