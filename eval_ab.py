@@ -1,0 +1,383 @@
+# -*- coding: utf-8 -*-
+"""微知 v2 · M1 的 A/B 评测脚手架（CP5，对应方案第 11 节）。
+
+这一步要验证的是最关键假设：**受证据约束的模型重写，是否真的比现有模板更有学习价值。**
+
+脚本只做三件事：
+1. 对同一批证据产出两个版本——规则版（v1 基线，不做教学重写）与模型版（v2）；
+2. 随机编号成 A/B，让评审人不知道哪个是哪版；
+3. 生成待填评分表。
+
+**脚本不判定胜负。** 方案写得很清楚：只有模型版在事实质量不下降的前提下
+显著提高教学评分，才继续进入 M2/M3。这个判断必须人来做。
+
+用法::
+
+    python eval_ab.py --demo                      # 内置样例，离线跑通
+    python eval_ab.py --materials my.json --seed 7
+    python eval_ab.py --demo --provider deepseek  # 需 config.json 里的 API Key
+
+材料文件格式（JSON 数组）::
+
+    [{"title": "Hugging Face 文本生成教程", "url": "https://...", "text": "原文..."}]
+
+已知局限（必须看清再用结论）：
+默认用 FakeTextProvider，模型版的结构合规但**内容是合成的**，只能验证脚手架
+是否跑通，不能用来判断教学价值。真实结论必须用 `--provider deepseek` 跑真模型。
+"""
+import argparse
+import json
+import os
+import random
+import sys
+from datetime import datetime
+
+import card_gates
+import card_writer
+import db
+import evidence
+import schema_v2
+from providers import FakeTextProvider, ProviderError
+
+# 方案 11 的盲评维度。前四项越高越好，阅读负荷单独看（越低越好）。
+DIMENSIONS = [
+    ("事实准确", "每个事实都能追溯到材料，没有编造的数字或限定条件"),
+    ("解释深度", "讲清了是什么与为什么，不是复述原文"),
+    ("同质化", "低分 = 通用模板腔；高分 = 有针对这段材料的独特组织"),
+    ("迁移价值", "看完能用到另一个场景，迁移任务不是原文例子换皮"),
+    ("阅读负荷", "5 分 = 很轻；1 分 = 很重。这一项越低越好"),
+]
+
+DEMO_MATERIALS = [
+    {
+        "title": "Agent Harness 的执行循环",
+        "url": "https://example.com/agent-harness",
+        "text": """
+Agent Harness 是一种把模型、工具与循环组织起来的执行框架。
+
+它的核心循环由上下文组装、模型调用、工具执行与状态回写四个阶段组成。
+每一轮循环结束后，框架会把工具返回的结果追加回上下文，作为下一轮的输入。
+
+```python
+def step(ctx):
+    return model.call(assemble(ctx))
+```
+
+| 阶段 | 输入 | 输出 |
+| --- | --- | --- |
+| 上下文组装 | 历史消息 | 完整提示词 |
+| 工具执行 | 工具调用请求 | 工具结果 |
+
+在 2025 年 3 月的评测中，该框架的准确率达到 87.5%，比基线高出 12 个百分点。
+模型版本 v3.1.4 引入了并行工具调用，把多工具场景的耗时压到了原来的三分之一。
+
+需要注意的是，这套循环假设工具调用是幂等的；涉及写操作的工具需要额外的确认层。
+
+首页 | 订阅 | 阅读原文
+""",
+    },
+]
+
+
+def rule_version(claims, material):
+    """规则版基线（v1 思路）：按原文顺序拼接证据，不做教学重写。
+
+    规则版是「抓正文 → 套模板」这条链路在无模型时的确定性近似：不重新组织、
+    不解释、不补边界、不给迁移任务。它刻意保留了 v1 的典型特征——
+    原文怎么说就怎么排，读起来像摘要而不像讲解。
+    """
+    picked = [c for c in claims if c.get("usable", True)][:6]
+    body = "\n".join(c["text"] for c in picked)
+    return {
+        "version": "rule",
+        "title": material.get("title") or "未命名材料",
+        "objective": "",
+        "lead": (picked[0]["text"] if picked else "")[:60],
+        "body": body,
+        "key_points": [c["text"][:30] for c in picked[:3]],
+        "transfer_task": "",
+        "cites": [c["claim_idx"] for c in picked],
+    }
+
+
+def model_version(provider, goal, claims, material, source_id):
+    """模型版（v2）：证据约束的教学重写，带质量门禁。"""
+    try:
+        draft, _draft_id, report = card_writer.write_card_gated(
+            provider, goal, claims,
+            source={"title": material.get("title"), "url": material.get("url")},
+            source_id=source_id,
+        )
+    except ProviderError as exc:
+        return {"version": "model", "error": str(exc)}
+    return {
+        "version": "model",
+        "title": draft.get("title", ""),
+        "objective": draft.get("objective", ""),
+        "lead": draft.get("lead", ""),
+        "body": "\n".join(
+            b.get("text", "") for _k, b in schema_v2.iter_blocks(draft)
+        ),
+        "key_points": draft.get("key_points", []),
+        "transfer_task": draft.get("transfer_task", ""),
+        "boundaries": "\n".join(
+            b.get("text", "") for k, b in schema_v2.iter_blocks(draft) if k == "boundaries"
+        ),
+        "cites": sorted({
+            c for _k, b in schema_v2.iter_blocks(draft) for c in (b.get("cites") or [])
+        }),
+        "gate_passed": report.get("passed"),
+        "gate_issues": [i["tag"] for i in report.get("issues", [])],
+    }
+
+
+def build_pair(material, goal, provider):
+    """对一份材料产出 (规则版, 模型版)。"""
+    clean = evidence.clean_text(material["text"])
+    claims = evidence.extract_claims(clean)
+    if len(claims) < evidence.MIN_CLAIMS_FOR_PACK:
+        return None
+    source_id = db.save_v2_source(
+        url=material.get("url") or "eval:%s" % material.get("title"),
+        title=material.get("title"),
+        content_hash=evidence.content_hash(clean),
+        clean_text=clean,
+    )
+    db.save_v2_claims(source_id, claims)
+    return {
+        "material": material.get("title"),
+        "url": material.get("url"),
+        "claim_count": len(claims),
+        "rule": rule_version(claims, material),
+        "model": model_version(provider, goal, claims, material, source_id),
+    }
+
+
+def _render_version(v):
+    lines = ["**目标**：" + (v.get("objective") or "（规则版不设定学习目标）"), ""]
+    lines.append("**导语**：" + (v.get("lead") or "（无）"))
+    lines.append("")
+    lines.append("**正文**：")
+    lines.append("")
+    lines.append(v.get("body") or "（无）")
+    lines.append("")
+    if v.get("key_points"):
+        lines.append("**关键点**：")
+        lines.extend("- " + str(k) for k in v["key_points"])
+        lines.append("")
+    if v.get("boundaries"):
+        lines.append("**边界**：" + v["boundaries"])
+        lines.append("")
+    lines.append("**迁移任务**：" + (v.get("transfer_task") or "（无）"))
+    lines.append("")
+    lines.append("**引用证据编号**：" + ", ".join("#%s" % c for c in (v.get("cites") or [])))
+    if v["version"] == "model" and v.get("gate_issues"):
+        lines.append("")
+        lines.append("**门禁拦截**：" + "、".join(v["gate_issues"]))
+    return "\n".join(lines)
+
+
+def blind_pairs(pairs, seed):
+    """随机决定每对里 A 是规则版还是模型版，并记录答案供事后揭盲。"""
+    rng = random.Random(seed)
+    blinded = []
+    for i, pair in enumerate(pairs):
+        rule_first = rng.random() < 0.5
+        blinded.append({
+            "idx": i + 1,
+            "material": pair["material"],
+            "A": pair["rule"] if rule_first else pair["model"],
+            "B": pair["model"] if rule_first else pair["rule"],
+            "_answer": {"A": "rule" if rule_first else "model",
+                        "B": "model" if rule_first else "rule"},
+        })
+    return blinded
+
+
+def render_blind_md(blinded, seed, provider_kind="fake"):
+    out = [
+        "# 盲评材料（M1 A/B）",
+        "",
+        "> 生成时间：%s ｜ 随机种子：%s ｜ Provider：%s"
+        % (datetime.now().strftime("%Y-%m-%d %H:%M"), seed, provider_kind),
+        ">",
+        "> 下面是若干组材料，每组有 A、B 两个版本，**你不知道哪个是新方案**。",
+        "> 请先读完一组再打分，不要在两版之间来回对照细节。",
+        "> 评判依据是「是否真的有助于学会」，不是「哪版写得更漂亮」。",
+    ]
+    if provider_kind == "fake":
+        out += [
+            ">",
+            "> ⚠️ **本批由 Fake Provider 生成，盲评不成立，请勿据此下结论。**",
+            "> 它的唯一用途是确认脚手架跑得通；真实结论要加 `--provider deepseek` 重跑。",
+        ]
+    out.append("")
+    for item in blinded:
+        out.append("---")
+        out.append("")
+        out.append("## 第 %d 组 · %s" % (item["idx"], item["material"]))
+        out.append("")
+        for label in ("A", "B"):
+            out.append("### 版本 %s" % label)
+            out.append("")
+            out.append(_render_version(item[label]))
+            out.append("")
+    return "\n".join(out)
+
+
+def render_score_md(blinded, seed):
+    header = "| 组 | 材料 | 版本 | " + " | ".join(d for d, _ in DIMENSIONS) + " | 一句话理由 |"
+    sep = "|---|---|---|" + "---|" * (len(DIMENSIONS) + 1)
+    rows = [header, sep]
+    for item in blinded:
+        for label in ("A", "B"):
+            rows.append("| %d | %s | %s | " % (item["idx"], item["material"], label)
+                        + " | ".join("" for _ in DIMENSIONS) + " |  |")
+    out = [
+        "# 评分表（M1 A/B）",
+        "",
+        "> 随机种子：%s（答案见同目录 answers.json，评完分再揭盲）" % seed,
+        ">",
+        "> 每项 1-5 分。**阅读负荷越低越好**（5=很轻，1=很重），其余越高越好。",
+        "",
+    ]
+    out.extend(rows)
+    out.append("")
+    out.append("## 维度说明")
+    out.append("")
+    for name, desc in DIMENSIONS:
+        out.append("- **%s**：%s" % (name, desc))
+    out.append("")
+    out.append("## 判定规则（方案第 11 节）")
+    out.append("")
+    out.append("只有当模型版满足以下两条，才进入 M2/M3：")
+    out.append("")
+    out.append("1. **事实准确不低于规则版**（新方案不能为了好读而牺牲事实质量）；")
+    out.append("2. **解释深度 / 同质化 / 迁移价值的均分显著高于规则版。**")
+    out.append("")
+    out.append("否则回到 M1 内部调提示词与门禁阈值，不要进入 M2。")
+    return "\n".join(out)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="M1 A/B 评测脚手架（方案第 11 节）")
+    ap.add_argument("--demo", action="store_true", help="用内置样例材料，离线跑通")
+    ap.add_argument("--materials", help="材料 JSON 文件：[{title,url,text}]")
+    ap.add_argument("--out", default="eval_out", help="输出目录，默认 eval_out")
+    ap.add_argument("--seed", type=int, default=20260910, help="盲评随机编号种子")
+    ap.add_argument("--provider", default="fake", choices=["fake", "deepseek"],
+                    help="模型版用哪个 Provider；fake 只能验证流程，不能得结论")
+    args = ap.parse_args(argv)
+
+    if not args.demo and not args.materials:
+        ap.error("需要 --demo 或 --materials")
+
+    if args.materials:
+        with open(args.materials, encoding="utf-8") as fh:
+            materials = json.load(fh)
+    else:
+        materials = DEMO_MATERIALS
+
+    provider = _make_provider(args.provider)
+
+    db.init_db()
+    goal = schema_v2.make_goal(
+        key="ab-eval",
+        capability="能说清材料讲的核心机制，并判断它适用到什么边界",
+        level="有基础但不系统",
+        scene="读完能在自己的项目里判断要不要用",
+        success_evidence="能不查资料复述核心机制并说出一个不适用场景",
+        prereq=["基本编程"],
+        milestones=["复述机制", "举出反例"],
+        daily_minutes=60,
+    )
+
+    pairs, skipped = [], []
+    for m in materials:
+        pair = build_pair(m, goal, provider)
+        (pairs if pair else skipped).append(pair or m.get("title"))
+
+    blinded = blind_pairs(pairs, args.seed)
+
+    outdir = os.path.join(args.out, datetime.now().strftime("%Y-%m-%d"))
+    os.makedirs(outdir, exist_ok=True)
+    _write(os.path.join(outdir, "blind.md"),
+           render_blind_md(blinded, args.seed, args.provider))
+    _write(os.path.join(outdir, "score_sheet.md"), render_score_md(blinded, args.seed))
+    _write(os.path.join(outdir, "answers.json"),
+           json.dumps({"seed": args.seed,
+                       "answers": {b["idx"]: b["_answer"] for b in blinded}},
+                      ensure_ascii=False, indent=2))
+    _write(os.path.join(outdir, "pairs.json"),
+           json.dumps(pairs, ensure_ascii=False, indent=2, default=str))
+
+    print("✅ 盲评材料已生成：%s" % outdir)
+    print("   材料组数：%d ｜ 跳过（证据不足）：%d" % (len(pairs), len(skipped)))
+    if skipped:
+        print("   ⏭️  跳过：%s" % "、".join(str(s) for s in skipped))
+    if args.provider == "fake":
+        print("⚠️  用的是 Fake Provider：模型版内容由脚本合成，只能验证流程跑通，")
+        print("   不能用来判断教学价值。真实结论请加 --provider deepseek。")
+    print("👉 先填 score_sheet.md，再对照 answers.json 揭盲。脚本不会替你判定胜负。")
+    return 0
+
+
+def _fake_draft(inputs):
+    """离线假模型：产出结构合规的草稿，内容明确标注为合成。
+
+    刻意不写任何阿拉伯数字——这样数字一致性门禁不会误报，脚手架跑的是
+    「流程通不通」，不是「内容好不好」。真实结论必须换 deepseek provider。
+    """
+    import re
+    idxs = [int(n) for n in re.findall(r"\[#(\d+)\]", inputs.get("evidence_block", ""))]
+    a = idxs[0] if idxs else 0
+    b = idxs[1] if len(idxs) > 1 else a
+    c = idxs[2] if len(idxs) > 2 else b
+    return {
+        "schema_version": schema_v2.SCHEMA_VERSION,
+        "objective": inputs.get("objective", "")[:60] or "说清材料讲的核心机制",
+        "title": "【合成】" + (inputs.get("source_title") or "未命名材料"),
+        "lead": "这是 Fake Provider 产出的合成内容，仅用于验证脚手架链路是否跑通，不代表真实生成质量。",
+        "explanation": [
+            {"text": "（合成文本）该机制由若干相互衔接的环节组成，每个环节都把上一环的输出当成自己的输入，"
+                     "因此判断问题出在哪一环，比笼统地评价整体表现更有用。",
+             "cites": [a, b]},
+        ],
+        "examples": [
+            {"text": "（合成文本）一次完整调用会按顺序走完这些环节，中途任一步的结果都会被记录，"
+                     "这也是它可观测、可调试的原因。",
+             "cites": [b]},
+        ],
+        "boundaries": [
+            {"text": "（合成文本）这套划分来自材料给出的场景；换到材料未覆盖的场景时，需要先验证前提是否还成立。",
+             "cites": [c]},
+        ],
+        "key_points": ["由若干相互衔接的环节组成", "上一环输出即下一环输入", "每个环节都是可观测的调试点"],
+        "transfer_task": "（合成文本）挑一个你熟悉的同类系统，指出它对应的中间环节在哪，并说明跳过后会怎样。",
+        "estimated_minutes": 7,
+    }
+
+
+def _make_provider(kind):
+    if kind == "fake":
+        return FakeTextProvider(responder=lambda task, inputs: _fake_draft(inputs))
+    from providers import DeepSeekProvider
+    cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+    if not os.path.exists(cfg_path):
+        print("❌ 缺少 config.json，无法使用 deepseek provider", file=sys.stderr)
+        raise SystemExit(2)
+    with open(cfg_path, encoding="utf-8") as fh:
+        key = json.load(fh).get("deepseek_api_key")
+    if not key or key.startswith("sk-你的"):
+        print("❌ config.json 里的 deepseek_api_key 未填写", file=sys.stderr)
+        raise SystemExit(2)
+    return DeepSeekProvider(api_key=key)
+
+
+def _write(path, text):
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
