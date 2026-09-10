@@ -6,52 +6,20 @@ import pytest
 import db
 import schema_v2
 from card_writer import build_inputs, render_evidence, write_card
+from conftest import make_claims, make_draft, make_v2_goal
 from providers import FakeTextProvider, ProviderError
 
-GOAL = schema_v2.make_goal(
-    key="agent-harness",
-    capability="能说清 Agent Harness 的循环由哪几阶段组成",
-    level="能读源码但没系统梳理过",
-    scene="给团队做一次 20 分钟分享",
-    success_evidence="能不查资料画出循环图并标注每阶段职责",
-    prereq=["用过 LLM API"],
-    milestones=["画出循环图"],
-    daily_minutes=60,
-)
-
-CLAIMS = [
-    {"claim_idx": 0, "text": "Agent Harness 是一种把模型、工具与循环组织起来的执行框架。", "kind": "definition"},
-    {"claim_idx": 1, "text": "它的核心循环由上下文组装、模型调用、工具执行与状态回写四个阶段组成。", "kind": "fact"},
-    {"claim_idx": 2, "text": "在 2025 年 3 月的评测中，该框架的准确率达到 87.5%。", "kind": "number"},
-]
+GOAL = make_v2_goal()
+CLAIMS = make_claims()
 
 
 def good_draft():
-    return {
-        "schema_version": "1.0",
-        "objective": "能说清 Agent Harness 循环包含的四个阶段",
-        "title": "Agent Harness 的四个阶段",
-        "lead": "把 Agent 拆成循环来看，才能判断卡在哪一步。",
-        "explanation": [
-            {"text": "Agent Harness 把模型、工具与循环组织成一个执行框架，核心循环分四阶段。",
-             "cites": [0, 1]},
-        ],
-        "examples": [
-            {"text": "一次问答请求会依次经过上下文组装、模型调用、工具执行与状态回写。",
-             "cites": [1]},
-        ],
-        "boundaries": [
-            {"text": "该结论来自 2025 年 3 月的评测，换到别的框架不一定成立。", "cites": [2]},
-        ],
-        "key_points": ["循环由四阶段组成", "状态回写决定下一轮上下文", "工具执行是可观测点"],
-        "transfer_task": "挑一个你常用的 Agent 产品，指出它的状态回写发生在哪一步。",
-        "estimated_minutes": 7,
-    }
+    return make_draft()
 
 
 def responder(task, inputs):
-    """假模型：从 evidence_block 里取真实存在的编号来引用。"""
-    return good_draft()
+    """假模型：返回一份合规草稿。"""
+    return make_draft()
 
 
 # ---------- Schema 校验 ----------

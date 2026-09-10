@@ -18,6 +18,7 @@
     from card_writer import write_card
     draft, draft_id = write_card(FakeTextProvider(...), goal, claims)
 """
+import card_gates
 import schema_v2
 import db
 import evidence
@@ -36,12 +37,16 @@ def render_evidence(claims):
     )
 
 
-def build_inputs(goal, claims, source=None, objective=None):
-    """组装模型输入。所有值都是字符串/整数，方便做哈希与缓存。"""
+def build_inputs(goal, claims, source=None, objective=None, repair_notes=None):
+    """组装模型输入。所有值都是字符串/整数，方便做哈希与缓存。
+
+    `repair_notes` 是门禁拦截意见，只在「修复一次」那一轮才有内容。
+    """
     source = source or {}
     return {
         "schema_version": schema_v2.SCHEMA_VERSION,
         "banned": "、".join(BANNED_PHRASES),
+        "repair_notes": repair_notes or "（首次生成，无）",
         "objective": objective or goal.get("capability", ""),
         "learner_level": goal.get("level") or "未说明",
         "scene": goal.get("scene") or "未说明",
@@ -104,3 +109,84 @@ def write_card(provider, goal, claims, source=None, source_id=None,
         status="draft",
     )
     return draft, draft_id
+
+
+def write_card_gated(provider, goal, claims, source=None, source_id=None,
+                     objective=None, prompt_version=None, max_repair=1):
+    """带质量门禁的卡片生成：失败最多修复一次，仍不合格则 rejected 且不成为候选包。
+
+    返回 (draft, draft_id, report)。
+    - report["passed"] 为 True：草稿状态 draft，可被 `promote_to_candidate` 发布
+    - report["passed"] 为 False：草稿状态 rejected，失败原因留在 gate_report 里
+
+    为什么只修一次：方案 M1 明确「最多修复一次」。修多轮既烧钱，
+    又会把模型反复拉扯成没有信息量的安全表述。
+    """
+    errs = schema_v2.validate_goal_spec(goal)
+    if errs:
+        raise ValueError("GoalSpec 不合法: " + "；".join(errs))
+
+    claims = [c for c in (claims or []) if c.get("usable", True)]
+    if len(claims) < evidence.MIN_CLAIMS_FOR_PACK:
+        raise ValueError(
+            "可用证据 %d 条 < %d，不足以规划学习包（方案 3.1）"
+            % (len(claims), evidence.MIN_CLAIMS_FOR_PACK)
+        )
+
+    prompt_version = prompt_version or provider.prompt_version
+    validator = _make_validator(claims)
+
+    inputs = build_inputs(goal, claims, source, objective)
+    base_hash = providers.make_input_hash(TASK, prompt_version, provider.name, inputs)
+
+    draft = provider.generate_json(TASK, validator, inputs, idempotency_key=base_hash)
+    issues = card_gates.run_gates(draft, claims)
+
+    repaired = 0
+    while issues and repaired < max_repair:
+        repaired += 1
+        repair_inputs = build_inputs(
+            goal, claims, source, objective,
+            repair_notes=card_gates.render_issues(issues),
+        )
+        draft = provider.generate_json(
+            TASK, validator, repair_inputs,
+            idempotency_key="%s:repair%d" % (base_hash, repaired),
+        )
+        issues = card_gates.run_gates(draft, claims)
+
+    report = card_gates.gate_report(draft, claims)
+    report["repair_attempts"] = repaired
+
+    draft_id = db.save_v2_card_draft(
+        input_hash=base_hash,
+        schema_version=draft.get("schema_version", schema_v2.SCHEMA_VERSION),
+        payload=draft,
+        source_id=source_id,
+        goal_key=goal.get("key"),
+        objective=draft.get("objective"),
+        # 方案 M1：仍不合格则保留失败原因，不创建候选包
+        status="draft" if report["passed"] else "rejected",
+        gate_report=report,
+    )
+    return draft, draft_id, report
+
+
+def promote_to_candidate(draft_id, claims):
+    """把草稿提升为候选包。门禁没过的草稿一律拒绝，返回 (ok, reason)。
+
+    这是方案第 7 节「生产与发布之间需要质量门禁」的最后一道闸门：
+    发布前**重新跑一次门禁**，不信历史状态——草稿可能被手工改过。
+    """
+    row = db.get_v2_card_draft_by_id(draft_id)
+    if not row:
+        return False, "草稿不存在"
+    if row["status"] == "published":
+        return False, "已经是候选包"
+
+    issues = card_gates.run_gates(row["payload"] or {}, claims)
+    if issues:
+        return False, "门禁未过: " + "；".join("%s(%s)" % i for i in issues)
+
+    db.set_v2_card_draft_status(draft_id, "published", gate_report=card_gates.gate_report(row["payload"], claims))
+    return True, "ok"

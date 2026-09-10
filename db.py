@@ -1470,6 +1470,21 @@ def get_v2_card_draft(input_hash):
     return d
 
 
+def get_v2_card_draft_by_id(draft_id):
+    """按 id 取草稿。发布前要用它拿到最新 payload 重跑门禁，不信历史状态。"""
+    conn = _conn()
+    try:
+        row = conn.execute("SELECT * FROM v2_card_drafts WHERE id = ?", (draft_id,)).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return None
+    d = dict(row)
+    d["payload"] = _load(d.get("payload"))
+    d["gate_report"] = _load(d.get("gate_report"))
+    return d
+
+
 def list_v2_card_drafts(status=None, limit=50):
     conn = _conn()
     try:
