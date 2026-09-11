@@ -991,3 +991,61 @@ QUIZ_USER = """请基于下面的正文和证据，为这张卡片出题。
 V2_PROMPTS.update({
     "quiz_gen": {"system": QUIZ_SYSTEM, "user": QUIZ_USER},
 })
+
+
+# ============================================================
+# v2 · 桥接补全（把 v2 卡片补成 v1 前端能读的形态）
+#
+# v1 前端读的字段里，v2 不产的有两个：think_answer（≥150 字）与
+# open_question（简答题含评分要点）。它们不是 v2 的设计缺陷，
+# 而是 v1 模板的历史包袱，所以单独一次调用补齐，不污染 v2 的卡片正文。
+#
+# 注意：v1 的 rule_check 还要求 quiz≥3、review_quiz≥3，这两条已被
+# 范围决策明确废除（题量由目标决定、题库按时间分层）。这里**不凑题**，
+# 冲突由 bridge.check_v1_compat 如实报出，等 v1 门禁同步放宽。
+# ============================================================
+
+SUPPLEMENT_SYSTEM = """你在为一张已经写好的学习卡片补两个字段，它们要送到旧版阅读器显示。
+
+不要改写正文，也不要引入正文没讲过的新内容——只做「把已有内容重新组织成
+另一个字段」这件事。
+
+- `think_answer`：针对迁移任务的参考答案，150-250 字。要讲透判断依据，
+  并给一个具体例子。不是泛泛而谈，读者要能拿它对照自己写的答案。
+- `open_question`：一道简答题，考察对核心观点的理解或应用。
+  含 `question`（30-60 字）、`reference_answer`（100-180 字）、
+  `grading_points`（2-3 个可量化的评分要点，每条 15 字以内）。
+
+只输出合法的 JSON。
+"""
+
+SUPPLEMENT_USER = """请为下面这张卡片补 think_answer 与 open_question。
+
+【学习目标】
+{objective}
+
+【正文】
+{body_block}
+
+【迁移任务】
+{transfer_task}
+
+【关键点】
+{key_points}
+
+输出 JSON（字段名必须完全一致）：
+{{
+  "think_answer": "迁移任务的参考答案，150-250 字",
+  "open_question": {{
+    "question": "简答题，30-60 字",
+    "reference_answer": "参考答案，100-180 字",
+    "grading_points": ["评分要点1（15字内）", "评分要点2", "评分要点3"]
+  }}
+}}
+"""
+
+V2_PROMPTS.update({
+    "card_supplement": {"system": SUPPLEMENT_SYSTEM, "user": SUPPLEMENT_USER},
+})
+
+

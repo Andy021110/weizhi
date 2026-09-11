@@ -150,3 +150,67 @@ def test_evidence_and_draft_are_persisted(tmp_db, provider):
     assert db.count_v2_claims(sid) == len(claims)
     assert db.get_v2_source_by_id(sid)["clean_text"]
     assert db.load_v2_claims(sid, usable_only=True)
+
+
+def test_bridge_conflict_must_be_fixed_before_shipping(tmp_db, provider):
+    """桥接**不能单独上线**：v1 旧门禁会拦掉每一张符合新范围决策的 v2 卡。
+
+    这是一个刻意留下的「失败即证明」用例。范围决策废除了固定题量
+    （每卡三道随堂题 + 三道复习题），改成按目标定题量、题库按时间分层。
+    而 v1 的 rule_check 至今硬要求 quiz≥3 且 review_quiz≥3。
+
+    结果：一张 1 道 immediate + 2 道后续层的 v2 卡（完全合规）会被判不合格。
+    所以 V1–V4 那批「旧门禁放宽」必须与桥接同批上线，否则桥接出来的卡
+    一张都发不出去。等旧门禁放宽后，这个用例应当改为断言通过。
+    """
+    import assessment
+    import bridge_v1
+    import card_writer
+    import db
+    import evidence
+    import schema_v2
+
+    sid, claims = evidence.ingest_source(
+        "https://example.com/bridge", MATERIAL, title="Agent Harness 执行循环")
+    goal = schema_v2.make_goal(
+        "bridge-demo", "能说清 Agent Harness 的循环结构并定位问题出在哪一环",
+        level="能读源码但没梳理过", scene="给团队做技术分享",
+        success_evidence="能不查资料画出循环图并标注各阶段职责",
+        prereq=["用过 LLM API"], milestones=["说出四个阶段", "画出循环图"],
+        daily_minutes=60)
+
+    draft, draft_id, report = card_writer.write_card_gated(
+        provider, goal, claims,
+        source={"title": "Agent Harness 执行循环", "url": "https://example.com/bridge"},
+        source_id=sid)
+    assert report["passed"], report
+
+    # 复用已生成的题目，避免多花一次模型调用
+    items = db.get_v2_draft_assessment(draft_id) or []
+    if not items:
+        items, _ = assessment.generate(provider, draft, claims,
+                                       concept="m1", draft_id=draft_id)
+    assert items, "需要题目才能验证桥接"
+    assert all(it.get("layer") in assessment.LAYERS for it in items), \
+        "题目必须带时间分层（范围决策 D2）"
+
+    card = bridge_v1.from_draft(
+        draft_id, provider=provider,
+        material={"title": "Agent Harness 执行循环", "url": "https://example.com/bridge",
+                  "site": "示例", "kind": "evolving", "source_tier": "blog"})
+
+    # 映射本身是对的：正文、要点、答案、元信息都到位
+    assert len(card["body"]) >= 600
+    assert card["core_points"], "关键点必须带过去"
+    assert len(card["think_answer"]) >= 150, "v1 门禁硬要求 150 字"
+    assert card["open_question"] and card["open_question"].get("grading_points")
+    assert card["difficulty"] and card["timeliness"] and card["credibility"]
+    assert card["_bridge"]["origin"] == "v2", "要能追回是哪次 v2 生成"
+
+    # 而旧门禁必然拦下它 —— 这就是必须同批放宽的证据
+    conflicts = bridge_v1.check_v1_compat(card)
+    passed, issues = bridge_v1.publish_gate(card)
+    assert not passed, "当前状态下桥接卡不该能直接发布"
+    assert any("quiz" in str(t) or "quiz" in str(d) for t, d in issues), \
+        "冲突应当明确指出固定题量，实际: %s" % issues
+    assert conflicts, "check_v1_compat 要能把冲突列出来，而不是静默通过"
