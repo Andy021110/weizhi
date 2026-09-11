@@ -82,17 +82,22 @@ def rule_check(card):
     elif len(ta) < 150:
         issues.append(("回答过短", "think_answer %d字<150" % len(ta)))
 
-    quiz_min = 2 if template in ("t1_vocab", "t4_trivia", "t5_skill") else 3
+    # 范围决策：固定题量（随堂三道 + 复习三道）已废除，题量由学习目标决定。
+    # 唯一硬要求是「学完当场要能测」——至少一道即时题；24 小时/7 天层可有可无。
+    # 注意不要退回旧写法：那是把刚废掉的规则又固化回来。
     quiz = card.get("quiz") or []
-    if len(quiz) < quiz_min:
-        issues.append(("quiz不足", "%d<%d" % (len(quiz), quiz_min)))
     rq = card.get("review_quiz") or []
-    if len(rq) < 3:
-        issues.append(("复习题不足", "review_quiz %d<3" % len(rq)))
+    if not quiz:
+        issues.append(("缺即时题", "学完当场要能测，quiz 不能为空"))
+    if not (quiz or rq):
+        issues.append(("无题目", "这张卡没有任何可验证的题目"))
     if template in ("t2_reading", "t3_math", "t5_skill", "t6_code") and not card.get("open_question"):
         issues.append(("缺简答题", "open_question 为空"))
+    # 范围决策的软范围是「简单概念 600–900 / 技术机制 900–1500」，
+    # 所以 600 是软范围的下限而不是一条独立硬规则；数学与代码类正文可以更短，
+    # 因此这里只对 t2_reading 生效。
     if template == "t2_reading" and len(card.get("body") or "") < 600:
-        issues.append(("精读正文过短", "body %d字<600" % len(card.get("body") or "")))
+        issues.append(("精读正文过短", "body %d字<600（软范围下限）" % len(card.get("body") or "")))
 
     if db.find_duplicate(template, card.get("title"), exclude_source_url=card.get("source_url")):
         issues.append(("重复卡", "同模板同标题已存在"))

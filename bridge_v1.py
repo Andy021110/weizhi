@@ -155,27 +155,18 @@ def dedupe_key(card):
 
 
 def check_v1_compat(card):
-    """列出这张卡在 v1 旧门禁下会撞上的规则。
+    """列出这张卡在 v1 门禁下会撞上的规则。
 
-    存在的意义：让「旧门禁与范围决策冲突」这件事**可见**，而不是靠
-    编题凑数糊过去。这些冲突应该在 V1–V4 那批改动里同步放宽。
+    **实现上直接调用真实门禁，不复制阈值。** 之前这里复制了一份阈值，
+    结果是两处会各自漂移——而漂移的后果是「桥上看着能发、线上却被拦」，
+    这种错最难查。现在只有一处真相。
+
+    历史上这个函数还负责把「旧门禁要求固定题量」的冲突显式报出来。
+    固定题量已按范围决策放宽（见 daily_check），所以那些冲突不再出现；
+    保留这个入口是为了让调用方能不触发发布地先看一眼。
     """
-    issues = []
-    n_quiz = len(card.get("quiz") or [])
-    n_review = len(card.get("review_quiz") or [])
-    if n_quiz < 3:
-        issues.append(("旧门禁要求 quiz≥3",
-                       "本卡 %d 道。范围决策已废除固定题量，应由目标决定" % n_quiz))
-    if n_review < 3:
-        issues.append(("旧门禁要求 review_quiz≥3",
-                       "本卡 %d 道。范围决策已把两套题库合并为按时间分层" % n_review))
-    if len(card.get("body") or "") < 600:
-        issues.append(("精读正文过短", "body %d 字 < 600" % len(card.get("body") or "")))
-    if len((card.get("think_answer") or "")) < 150:
-        issues.append(("缺思考题答案", "think_answer %d 字 < 150" % len(card.get("think_answer") or "")))
-    if not card.get("open_question"):
-        issues.append(("缺简答题", "open_question 为空"))
-    return issues
+    import daily_check
+    return daily_check.rule_check(card)
 
 
 def validate_supplement(data):

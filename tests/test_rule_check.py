@@ -30,14 +30,24 @@ def test_short_think_answer(tmp_db):
     assert "回答过短" in _labels(c)
 
 
-def test_insufficient_quiz(tmp_db):
-    c = make_card(quiz=make_card()["quiz"][:1])
-    assert "quiz不足" in _labels(c)
+def test_empty_quiz_is_blocked(tmp_db):
+    """范围决策废除了固定题量，但「学完当场要能测」仍是硬要求。"""
+    c = make_card(quiz=[], review_quiz=[{"question": "回忆题", "options": ["A", "B"], "answer": 0}])
+    assert "缺即时题" in _labels(c)
 
 
-def test_insufficient_review_quiz(tmp_db):
-    c = make_card(review_quiz=make_card()["review_quiz"][:2])
-    assert "复习题不足" in _labels(c)
+def test_one_immediate_question_is_enough(tmp_db):
+    """单一判断目标一道好题就够——这是范围决策 D1 的直接后果。"""
+    c = make_card(quiz=make_card()["quiz"][:1], review_quiz=[])
+    labels = _labels(c)
+    assert "缺即时题" not in labels
+    assert "无题目" not in labels
+
+
+def test_review_quiz_count_is_not_enforced(tmp_db):
+    """随堂题与复习题已合并为分层题库，不再要求复习题满三道。"""
+    c = make_card(review_quiz=make_card()["review_quiz"][:1])
+    assert "复习题不足" not in _labels(c)
 
 
 def test_missing_open_question_for_reading(tmp_db):
@@ -50,10 +60,11 @@ def test_short_reading_body(tmp_db):
     assert "精读正文过短" in _labels(c)
 
 
-def test_vocab_quiz_minimum_is_two(tmp_db):
-    """T1 词汇卡 quiz 门槛是 2（不是 3）。"""
-    c = make_card(template="t1_vocab", quiz=make_card()["quiz"][:2])
-    assert "quiz不足" not in _labels(c)
+def test_no_template_specific_quiz_minimum(tmp_db):
+    """模板级题量下限已随范围决策一起废除（六类卡片也要从界面下线）。"""
+    for tpl in ("t1_vocab", "t2_reading", "t4_trivia", "t5_skill"):
+        c = make_card(template=tpl, quiz=make_card()["quiz"][:1])
+        assert "缺即时题" not in _labels(c), tpl
 
 
 def test_fast_missing_published_with_real_source(tmp_db):

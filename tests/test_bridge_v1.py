@@ -32,13 +32,15 @@ def _items(immediate=2, later=1):
     return out
 
 
-def _supplement():
-    return {
+def _supplement(**over):
+    data = {
         "think_answer": "判断依据是这套循环假设工具调用是幂等的。" * 8,
         "open_question": {"question": "什么情况下不能直接套用这套循环？",
                           "reference_answer": "当工具涉及写操作时，" * 10,
                           "grading_points": ["指出写操作需要确认层", "说明幂等假设"]},
     }
+    data.update(over)
+    return data
 
 
 # ---------- 映射 ----------
@@ -111,19 +113,25 @@ def test_bridge_records_provenance():
 
 # ---------- 不凑题 + 冲突可见 ----------
 
-def test_does_not_pad_questions_to_satisfy_old_gate():
-    """v1 门禁要 quiz≥3，但范围决策已废除固定题量——不许编题凑数。"""
+def test_does_not_pad_questions():
+    """范围决策废除了固定题量——桥接只做映射，绝不编题凑数。"""
     card = bridge_v1.to_v1_card(_draft(), _items(immediate=1, later=0), MATERIAL, _supplement())
     assert len(card["quiz"]) == 1, "不该为了过旧门禁编出多余题目"
     assert card["review_quiz"] == []
 
 
-def test_compat_reports_conflicts_instead_of_hiding_them():
+def test_compat_delegates_to_the_real_gate(tmp_db):
+    """不许在桥接里复制一份阈值：两份阈值必然漂移，
+    漂移的后果是「桥上看着能发、线上却被拦」。"""
+    import daily_check
     card = bridge_v1.to_v1_card(_draft(), _items(immediate=1, later=0), MATERIAL, _supplement())
-    issues = bridge_v1.check_v1_compat(card)
-    tags = [t for t, _ in issues]
-    assert any("quiz" in t for t in tags)
-    assert any("review_quiz" in t for t in tags)
+    assert bridge_v1.check_v1_compat(card) == daily_check.rule_check(card)
+
+
+def test_scope_compliant_card_now_passes_the_gate(tmp_db):
+    """固定题量放宽后，一张 1 道即时题的卡不再被拦。"""
+    card = bridge_v1.to_v1_card(_draft(), _items(immediate=1, later=1), MATERIAL, _supplement())
+    assert bridge_v1.check_v1_compat(card) == []
 
 
 def test_dedupe_key_differs_by_title():
@@ -178,7 +186,14 @@ def test_save_dedupes_same_source_and_title(tmp_db):
 
 def test_publish_gate_blocks_and_explains(tmp_db):
     """范围决策：模型生成的内容不能直接发布，必须过门禁。"""
-    card = bridge_v1.to_v1_card(_draft(), _items(immediate=1, later=0), MATERIAL, _supplement())
+    card = bridge_v1.to_v1_card(_draft(), _items(immediate=1, later=0), MATERIAL,
+                                _supplement(think_answer=""))
     ok, issues = bridge_v1.publish_gate(card)
     assert ok is False
     assert issues, "被拦下要给出原因，不能只返回 False"
+
+
+def test_publish_gate_passes_a_healthy_card(tmp_db):
+    card = bridge_v1.to_v1_card(_draft(), _items(immediate=1, later=1), MATERIAL, _supplement())
+    ok, issues = bridge_v1.publish_gate(card)
+    assert ok is True, issues

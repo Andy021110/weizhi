@@ -152,16 +152,13 @@ def test_evidence_and_draft_are_persisted(tmp_db, provider):
     assert db.load_v2_claims(sid, usable_only=True)
 
 
-def test_bridge_conflict_must_be_fixed_before_shipping(tmp_db, provider):
-    """桥接**不能单独上线**：v1 旧门禁会拦掉每一张符合新范围决策的 v2 卡。
+def test_bridge_output_can_reach_the_frontend(tmp_db, provider):
+    """v2 → 桥接 → v1 门禁 → 可发布。这条链路必须端到端通。
 
-    这是一个刻意留下的「失败即证明」用例。范围决策废除了固定题量
-    （每卡三道随堂题 + 三道复习题），改成按目标定题量、题库按时间分层。
-    而 v1 的 rule_check 至今硬要求 quiz≥3 且 review_quiz≥3。
-
-    结果：一张 1 道 immediate + 2 道后续层的 v2 卡（完全合规）会被判不合格。
-    所以 V1–V4 那批「旧门禁放宽」必须与桥接同批上线，否则桥接出来的卡
-    一张都发不出去。等旧门禁放宽后，这个用例应当改为断言通过。
+    历史：这个用例曾写的是「失败即证明」——当时 v1 的 rule_check 硬要求
+    quiz≥3 且 review_quiz≥3，而范围决策已废除固定题量，导致**每一张**
+    合规的 v2 卡都被拦下，桥接单独上线发不出一张卡。
+    固定题量已按范围决策放宽（`daily_check.rule_check`），现在断言通过。
     """
     import assessment
     import bridge_v1
@@ -207,10 +204,15 @@ def test_bridge_conflict_must_be_fixed_before_shipping(tmp_db, provider):
     assert card["difficulty"] and card["timeliness"] and card["credibility"]
     assert card["_bridge"]["origin"] == "v2", "要能追回是哪次 v2 生成"
 
-    # 而旧门禁必然拦下它 —— 这就是必须同批放宽的证据
-    conflicts = bridge_v1.check_v1_compat(card)
+    # 题目数量由目标决定，不再要求 3+3，但「学完当场要能测」仍是硬要求
+    assert card["quiz"], "至少要有一道即时题"
+    assert bridge_v1.check_v1_compat(card) == [], \
+        "合规的桥接卡不该再被门禁拦下：%s" % bridge_v1.check_v1_compat(card)
     passed, issues = bridge_v1.publish_gate(card)
-    assert not passed, "当前状态下桥接卡不该能直接发布"
-    assert any("quiz" in str(t) or "quiz" in str(d) for t, d in issues), \
-        "冲突应当明确指出固定题量，实际: %s" % issues
-    assert conflicts, "check_v1_compat 要能把冲突列出来，而不是静默通过"
+    assert passed, "桥接卡要能过门禁才能进推送，实际问题: %s" % issues
+
+    # 落库后要能在 v1 前端读到
+    assert bridge_v1.save(card, date="2026-09-11") is True
+    saved = [c for c in db.load_cards() if (c.get("_bridge") or {}).get("origin") == "v2"]
+    assert saved, "落库后应能从 v1 的 cards 表查回来"
+    assert saved[0]["template"] == "t2_reading"
