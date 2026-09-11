@@ -8,7 +8,12 @@
 并要求每段标出引用编号——模型负责讲清楚，**不负责决定什么是事实**。
 
 流程：校验 GoalSpec → 校验证据数量（方案 3.1 至少两条）→ 组装输入 →
-调 Provider（内置 Schema 校验与重试）→ 校验引用有效性 → 落 v2_card_drafts。
+**两次模型调用**（先写正文，再派生结构）→ 校验引用有效性 → 落 v2_card_drafts。
+
+为什么是两次调用：最初一次调用同时产出正文 + 边界 + 关键点 + 迁移任务，
+真人盲评三轮全部选了旧方案，反馈「有边界和迁移任务的卡，正文被挤短了」。
+根因是 schema 里的硬字段会抢占注意力预算。拆开后第一次调用只管把正文讲深，
+第二次在正文已定稿的基础上派生结构字段，两者不再争预算。
 
 注意：本模块**不做发布**。质量门禁（CP4）通过之后才允许成为候选包。
 
@@ -25,7 +30,9 @@ import evidence
 import providers
 from prompts import BANNED_PHRASES
 
-TASK = "card_writer"
+TASK_BODY = "card_body"
+TASK_STRUCTURE = "card_structure"
+TASK_DRAFT = "card_draft"
 
 
 def render_evidence(claims):
@@ -37,11 +44,7 @@ def render_evidence(claims):
     )
 
 
-def build_inputs(goal, claims, source=None, objective=None, repair_notes=None):
-    """组装模型输入。所有值都是字符串/整数，方便做哈希与缓存。
-
-    `repair_notes` 是门禁拦截意见，只在「修复一次」那一轮才有内容。
-    """
+def _common_inputs(goal, claims, source, objective, repair_notes=None):
     source = source or {}
     return {
         "schema_version": schema_v2.SCHEMA_VERSION,
@@ -58,14 +61,45 @@ def build_inputs(goal, claims, source=None, objective=None, repair_notes=None):
     }
 
 
-def _make_validator(claims):
-    """Schema 校验器：结构校验 + 引用有效性。
+def build_body_inputs(goal, claims, source=None, objective=None, repair_notes=None):
+    """第一次调用（写正文）的输入。"""
+    return _common_inputs(goal, claims, source, objective, repair_notes)
 
-    引用了不存在的证据编号属于可重试错误——交给 Provider 重试比在这里直接判死更划算。
+
+def build_structure_inputs(goal, claims, source=None, objective=None,
+                           body=None, repair_notes=None):
+    """第二次调用（派生结构）的输入。
+
+    `body_block` 是已定稿的正文——结构字段必须基于正文派生，所以正文一变，
+    这次调用的输入哈希就变，缓存自然失效。
     """
-    def validate(draft):
-        errs = schema_v2.validate_card_draft(draft)
-        unknown = schema_v2.unknown_cites(draft, claims)
+    inputs = _common_inputs(goal, claims, source, objective, repair_notes)
+    inputs["body_block"] = render_body(body or {})
+    return inputs
+
+
+def render_body(body):
+    """把正文渲染成给结构调用看的文本。"""
+    lines = []
+    if body.get("title"):
+        lines.append("标题：" + body["title"])
+    if body.get("lead"):
+        lines.append("导语：" + body["lead"])
+    for i, block in enumerate(body.get("explanation") or [], 1):
+        lines.append("解释 %d：%s" % (i, block.get("text") or ""))
+    for i, block in enumerate(body.get("examples") or [], 1):
+        lines.append("例子 %d：%s" % (i, block.get("text") or ""))
+    return "\n".join(lines)
+
+
+def _with_cite_check(validator, claims):
+    """给校验器加上引用有效性检查。
+
+    引用了不存在的证据编号属于可重试错误——交给 Provider 重试比直接判死更划算。
+    """
+    def validate(data):
+        errs = validator(data)
+        unknown = schema_v2.unknown_cites(data, claims)
         if unknown:
             errs.append("引用了不存在的证据编号: %s"
                         % "、".join("#%s(%s)" % (c, k) for k, c in unknown))
@@ -77,6 +111,35 @@ def _prepare_claims(goal, claims, max_claims):
     """过滤 + 选取要喂给模型的证据。证据太多时模型会把一张卡写成综述。"""
     usable = [c for c in (claims or []) if c.get("usable", True)]
     return evidence.select_claims(usable, goal, limit=max_claims)
+
+
+def _generate_draft(provider, goal, claims, source, objective,
+                    prompt_version, repair_notes=None):
+    """两次调用产出一份完整 CardDraft。返回 (draft, draft_hash)。"""
+    body_inputs = build_body_inputs(goal, claims, source, objective, repair_notes)
+    body_hash = providers.make_input_hash(
+        TASK_BODY, prompt_version, provider.name, body_inputs)
+    body = provider.generate_json(
+        TASK_BODY, _with_cite_check(schema_v2.validate_card_body, claims),
+        body_inputs, idempotency_key=body_hash,
+    )
+
+    struct_inputs = build_structure_inputs(
+        goal, claims, source, objective, body, repair_notes)
+    struct_hash = providers.make_input_hash(
+        TASK_STRUCTURE, prompt_version, provider.name, struct_inputs)
+    struct = provider.generate_json(
+        TASK_STRUCTURE, _with_cite_check(schema_v2.validate_card_structure, claims),
+        struct_inputs, idempotency_key=struct_hash,
+    )
+
+    draft = schema_v2.merge_card(body, struct)
+    # 草稿身份的哈希包含正文与结构两个哈希：任一部分变了就是新版本
+    draft_hash = providers.make_input_hash(
+        TASK_DRAFT, prompt_version, provider.name,
+        {"body": body_hash, "structure": struct_hash},
+    )
+    return draft, draft_hash
 
 
 def write_card(provider, goal, claims, source=None, source_id=None,
@@ -98,16 +161,12 @@ def write_card(provider, goal, claims, source=None, source_id=None,
             % (len(claims), evidence.MIN_CLAIMS_FOR_PACK)
         )
 
-    inputs = build_inputs(goal, claims, source, objective)
     prompt_version = prompt_version or provider.prompt_version
-    input_hash = providers.make_input_hash(TASK, prompt_version, provider.name, inputs)
-
-    draft = provider.generate_json(
-        TASK, _make_validator(claims), inputs, idempotency_key=input_hash
-    )
+    draft, draft_hash = _generate_draft(
+        provider, goal, claims, source, objective, prompt_version)
 
     draft_id = db.save_v2_card_draft(
-        input_hash=input_hash,
+        input_hash=draft_hash,
         schema_version=draft.get("schema_version", schema_v2.SCHEMA_VERSION),
         payload=draft,
         source_id=source_id,
@@ -142,32 +201,29 @@ def write_card_gated(provider, goal, claims, source=None, source_id=None,
         )
 
     prompt_version = prompt_version or provider.prompt_version
-    validator = _make_validator(claims)
 
-    inputs = build_inputs(goal, claims, source, objective)
-    base_hash = providers.make_input_hash(TASK, prompt_version, provider.name, inputs)
-
-    draft = provider.generate_json(TASK, validator, inputs, idempotency_key=base_hash)
+    draft, draft_hash = _generate_draft(
+        provider, goal, claims, source, objective, prompt_version)
     issues = card_gates.run_gates(draft, claims)
+    blocking, _warnings = card_gates.split_severity(issues)
 
     repaired = 0
-    while issues and repaired < max_repair:
+    # 只对阻断级问题发起修复。只有警告时再花一次调用不划算，
+    # 警告照常写进报告让人来判断。
+    while blocking and repaired < max_repair:
         repaired += 1
-        repair_inputs = build_inputs(
-            goal, claims, source, objective,
-            repair_notes=card_gates.render_issues(issues),
-        )
-        draft = provider.generate_json(
-            TASK, validator, repair_inputs,
-            idempotency_key="%s:repair%d" % (base_hash, repaired),
-        )
+        notes = card_gates.render_issues(blocking)
+        draft, draft_hash = _generate_draft(
+            provider, goal, claims, source, objective,
+            "%s+repair%d" % (prompt_version, repaired), notes)
         issues = card_gates.run_gates(draft, claims)
+        blocking, _warnings = card_gates.split_severity(issues)
 
     report = card_gates.gate_report(draft, claims)
     report["repair_attempts"] = repaired
 
     draft_id = db.save_v2_card_draft(
-        input_hash=base_hash,
+        input_hash=draft_hash,
         schema_version=draft.get("schema_version", schema_v2.SCHEMA_VERSION),
         payload=draft,
         source_id=source_id,
@@ -193,8 +249,9 @@ def promote_to_candidate(draft_id, claims):
         return False, "已经是候选包"
 
     issues = card_gates.run_gates(row["payload"] or {}, claims)
-    if issues:
-        return False, "门禁未过: " + "；".join("%s(%s)" % i for i in issues)
+    blocking, _warnings = card_gates.split_severity(issues)
+    if blocking:
+        return False, "门禁未过: " + "；".join("%s(%s)" % i for i in blocking)
 
     db.set_v2_card_draft_status(draft_id, "published", gate_report=card_gates.gate_report(row["payload"], claims))
     return True, "ok"

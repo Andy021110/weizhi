@@ -479,17 +479,12 @@ def main(argv=None):
     return 0
 
 
-def _fake_draft(inputs):
-    """离线假模型：产出结构合规的草稿，内容明确标注为合成。
-
-    刻意不写任何阿拉伯数字——这样数字一致性门禁不会误报，脚手架跑的是
-    「流程通不通」，不是「内容好不好」。真实结论必须换 deepseek provider。
-    """
+def _fake_body(inputs):
+    """离线假模型：正文部分。刻意不写阿拉伯数字，避免数字门禁误报干扰脚手架自检。"""
     import re
     idxs = [int(n) for n in re.findall(r"\[#(\d+)\]", inputs.get("evidence_block", ""))]
     a = idxs[0] if idxs else 0
     b = idxs[1] if len(idxs) > 1 else a
-    c = idxs[2] if len(idxs) > 2 else b
     return {
         "schema_version": schema_v2.SCHEMA_VERSION,
         "objective": inputs.get("objective", "")[:60] or "说清材料讲的核心机制",
@@ -505,6 +500,11 @@ def _fake_draft(inputs):
                      "这种「断崖式」的失败模式，正是判断哪一环掉了的最实用线索。"
                      "也因此，优化时盯着整体指标往往看不出该改哪一环，必须先把链条拆开看。",
              "cites": [b]},
+            {"text": "（合成文本）把链条拆开之后，排查就有了固定顺序：先看输入装了什么，"
+                     "再看中间处理是否按预期发生，最后看结果有没有被正确传下去。"
+                     "这个顺序之所以有效，是因为串联结构里问题只可能发生在某一环，"
+                     "而每一环都能单独观测。",
+             "cites": [b]},
         ],
         "examples": [
             {"text": "（合成文本）一次完整调用会按顺序走完这些环节，中途任一步的结果都会被记录下来。"
@@ -513,6 +513,15 @@ def _fake_draft(inputs):
                      "就只能对着最终结果猜，排查成本会高一个量级。",
              "cites": [b]},
         ],
+    }
+
+
+def _fake_structure(inputs):
+    """离线假模型：结构部分。"""
+    import re
+    idxs = [int(n) for n in re.findall(r"\[#(\d+)\]", inputs.get("evidence_block", ""))]
+    c = idxs[2] if len(idxs) > 2 else (idxs[0] if idxs else 0)
+    return {
         "boundaries": [
             {"text": "（合成文本）这套划分来自材料给出的场景；换到材料未覆盖的场景时，"
                      "需要先验证前提是否还成立，不能直接照搬。"
@@ -521,13 +530,23 @@ def _fake_draft(inputs):
         ],
         "key_points": ["由若干相互衔接的环节组成", "上一环输出即下一环输入", "每个环节都是可观测的调试点"],
         "transfer_task": "（合成文本）挑一个你熟悉的同类系统，指出它对应的中间环节在哪，并说明跳过后会怎样。",
-        "estimated_minutes": 7,
     }
+
+
+def _fake_draft(inputs):
+    """保留旧签名：返回一份完整草稿（两段拼起来），供不关心拆分的调用方使用。"""
+    return schema_v2.merge_card(_fake_body(inputs), _fake_structure(inputs))
+
+
+def _fake_responder(task, inputs):
+    if task == "card_body":
+        return _fake_body(inputs)
+    return _fake_structure(inputs)
 
 
 def _make_provider(kind):
     if kind == "fake":
-        return FakeTextProvider(responder=lambda task, inputs: _fake_draft(inputs))
+        return FakeTextProvider(responder=_fake_responder)
     from providers import DeepSeekProvider
     cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
     if not os.path.exists(cfg_path):

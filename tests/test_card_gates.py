@@ -7,7 +7,7 @@ import card_gates
 import db
 import schema_v2
 from card_writer import promote_to_candidate, write_card_gated
-from conftest import make_claims, make_draft, make_v2_goal
+from conftest import make_body, make_claims, make_draft, make_structure, make_v2_goal
 from providers import FakeTextProvider
 
 CLAIMS = make_claims()
@@ -72,7 +72,7 @@ def test_body_density_catches_hollow_draft():
 
 def test_body_density_catches_flooded_draft():
     draft = make_draft()
-    draft["explanation"][0]["text"] = "内容" * 1200
+    draft["explanation"][0]["text"] = "内容" * 1800
     assert any(t == "正文过长" for t, _ in card_gates.check_body_density(draft, CLAIMS))
 
 
@@ -110,40 +110,48 @@ def test_render_issues_is_readable():
 
 # ---------- 修复一次 + 不创建候选包 ----------
 
-def _provider_that_returns(*drafts):
-    """依次返回给定草稿；用尽后重复最后一个。"""
-    seq = list(drafts)
-    state = {"i": 0}
+def _provider_seq(body_seq, struct_seq, **kw):
+    """两次调用各自一条序列；用尽后重复该序列最后一个。
+
+    正文与结构是分开的两次调用，所以坏稿要分别指定——只把正文写坏、
+    结构保持合规，才能测出「正文被门禁拦下 → 修复一次」这条路径。
+    """
+    idx = {"card_body": 0, "card_structure": 0}
 
     def responder(task, inputs):
-        d = seq[min(state["i"], len(seq) - 1)]
-        state["i"] += 1
-        return copy.deepcopy(d)
-    return FakeTextProvider(responder=responder)
+        seq = body_seq if task == "card_body" else struct_seq
+        i = min(idx[task], len(seq) - 1)
+        idx[task] += 1
+        return copy.deepcopy(seq[i])
+
+    return FakeTextProvider(responder=responder, **kw)
+
+
+def _bad_body():
+    """正文命中禁用表达——会被 check_banned_phrases 拦下。"""
+    b = make_body()
+    b["lead"] = "值得注意，这个循环决定了 Agent 的上限。"
+    return b
 
 
 def test_bad_first_version_is_repaired_once(tmp_db):
     """第一版被门禁拦下 → 修复一次后通过，状态 draft 且记录修复次数。"""
-    bad = make_draft()
-    bad["lead"] = "值得注意，这个循环决定了 Agent 的上限。"
-    p = _provider_that_returns(bad, make_draft())
+    p = _provider_seq([_bad_body(), make_body()], [make_structure()])
     draft, draft_id, report = write_card_gated(p, _goal(), CLAIMS)
     assert report["passed"] is True
     assert report["repair_attempts"] == 1
-    assert p.call_count == 2
+    assert p.call_count == 4, "首轮正文+结构，修复轮正文+结构"
     row = db_row(draft_id)
     assert row["status"] == "draft"
 
 
 def test_still_bad_after_one_repair_is_rejected(tmp_db):
     """修复一次仍不合格 → rejected，失败原因留在 gate_report，不成为候选包。"""
-    bad = make_draft()
-    bad["lead"] = "值得注意，这个循环决定了 Agent 的上限。"
-    p = _provider_that_returns(bad, bad)
+    p = _provider_seq([_bad_body()], [make_structure()])
     draft, draft_id, report = write_card_gated(p, _goal(), CLAIMS)
     assert report["passed"] is False
     assert report["repair_attempts"] == 1, "只应修复一次"
-    assert p.call_count == 2, "修复一次即停"
+    assert p.call_count == 4, "修复一次即停"
 
     row = db_row(draft_id)
     assert row["status"] == "rejected"
@@ -152,9 +160,7 @@ def test_still_bad_after_one_repair_is_rejected(tmp_db):
 
 
 def test_promote_refuses_rejected_draft(tmp_db):
-    bad = make_draft()
-    bad["lead"] = "值得注意，这个循环决定了 Agent 的上限。"
-    p = _provider_that_returns(bad, bad)
+    p = _provider_seq([_bad_body()], [make_structure()])
     _, draft_id, _ = write_card_gated(p, _goal(), CLAIMS)
     ok, reason = promote_to_candidate(draft_id, CLAIMS)
     assert ok is False
@@ -163,7 +169,7 @@ def test_promote_refuses_rejected_draft(tmp_db):
 
 
 def test_promote_allows_passing_draft(tmp_db):
-    p = _provider_that_returns(make_draft())
+    p = _provider_seq([make_body()], [make_structure()])
     _, draft_id, report = write_card_gated(p, _goal(), CLAIMS)
     assert report["passed"] is True
     ok, reason = promote_to_candidate(draft_id, CLAIMS)
@@ -173,7 +179,7 @@ def test_promote_allows_passing_draft(tmp_db):
 
 def test_promote_rechecks_gates_even_if_status_says_draft(tmp_db):
     """发布前重跑门禁，不信历史状态——草稿可能已被手工改坏。"""
-    p = _provider_that_returns(make_draft())
+    p = _provider_seq([make_body()], [make_structure()])
     _, draft_id, _ = write_card_gated(p, _goal(), CLAIMS)
     row = db.get_v2_card_draft_by_id(draft_id)
     row["payload"]["lead"] = "综上所述，循环很重要。"
@@ -287,3 +293,33 @@ def test_number_absent_everywhere_is_fabrication():
         {"text": "在 2027 年的复现中准确率达到 99.4%，结论依然成立。", "cites": [0, 1]},
     ]
     assert any(t == "数字无出处" for t, _ in card_gates.check_number_consistency(draft, claims))
+
+
+def test_miscited_number_is_warning_not_blocking():
+    """引用精度问题不阻断发布：数字真实存在，只是引错了条目。"""
+    claims = [
+        {"claim_idx": 0, "kind": "fact", "text": "该研究发表于 2024 年。"},
+        {"claim_idx": 1, "kind": "fact", "text": "实验覆盖 12 个数据集，结论稳定。"},
+    ]
+    draft = make_draft()
+    draft["boundaries"] = [{"text": "这套结论覆盖 12 个数据集，样本量足够支撑判断。", "cites": [0]}]
+    report = card_gates.gate_report(draft, claims)
+    assert report["passed"] is True, "只有引用精度问题时不该判不合格"
+    assert report["warnings"] and not report["blocking"]
+    assert any(w["tag"] == "数字与引用不符" for w in report["warnings"])
+
+
+def test_fabricated_number_still_blocks():
+    claims = [{"claim_idx": 0, "kind": "fact", "text": "该研究发表于 2024 年。"}]
+    draft = make_draft()
+    draft["boundaries"] = [{"text": "该结论在 2027 年复现时依然成立。", "cites": [0]}]
+    report = card_gates.gate_report(draft, claims)
+    assert report["passed"] is False
+    assert any(b["tag"] == "数字无出处" for b in report["blocking"])
+
+
+def test_split_severity():
+    blocking, warnings = card_gates.split_severity(
+        [("数字无出处", "x"), ("数字与引用不符", "y"), ("缺引用", "z")])
+    assert [t for t, _ in blocking] == ["数字无出处", "缺引用"]
+    assert [t for t, _ in warnings] == ["数字与引用不符"]

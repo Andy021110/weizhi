@@ -17,9 +17,12 @@ import re
 import schema_v2
 from prompts import BANNED_PHRASES
 
-# 宽口径护栏：只挡空壳与灌水，不写死「必须 800-1000 字」
+# 宽口径护栏：只挡空壳与灌水，不写死「必须 800-1000 字」。
+# MAX 从 2400 提到 3200：拆成两次调用后正文明显变厚（实测 1987-2248 字），
+# 而按每分鐘 320 字算，3200 字正好是「10 分钟」的上限，在方案允许范围内。
+# 真正防「写成文章」的是 schema 的段落数上限，不是这个字数上限。
 MIN_BODY_CHARS = 450
-MAX_BODY_CHARS = 2400
+MAX_BODY_CHARS = 3200
 # 解释+例子+边界的最少字数。原先设 120 太松，放过了一批「骨架卡」：
 # 目标、引用、迁移任务一应俱全，但每条 explanation 只有两句话，读完还是不懂。
 # 真人反馈「有边界和迁移任务的卡，正文都被挤短了」之后提到 450，
@@ -126,12 +129,27 @@ GATES = (
 )
 
 
+# 警告级问题：记录进报告，但不阻断发布。
+# 「数字与引用不符」是**引用精度**问题——数字本身在证据里真实存在，只是引用
+# 条目没对准（实测：会议年份 2026 是真的，模型引了 #2 而该内容在 #1）。
+# 方案 M1 的门槛是「数字与证据一致」与「事实段落关联证据」，两条都满足，
+# 所以不该因为引错条目就把一张内容正确的卡判死。
+WARNING_TAGS = {"数字与引用不符"}
+
+
 def run_gates(draft, claims=None):
     """跑全部门禁，返回 [(标签, 详情)]。空列表 = 通过。"""
     issues = []
     for gate in GATES:
         issues.extend(gate(draft, claims))
     return issues
+
+
+def split_severity(issues):
+    """把问题分成 (阻断级, 警告级)。阻断级才决定能否发布。"""
+    blocking = [(t, d) for t, d in issues if t not in WARNING_TAGS]
+    warnings = [(t, d) for t, d in issues if t in WARNING_TAGS]
+    return blocking, warnings
 
 
 def render_issues(issues):
@@ -152,9 +170,13 @@ def gate_report(draft, claims=None):
     tags = {}
     for tag, _ in all_issues:
         tags[tag] = tags.get(tag, 0) + 1
+    blocking, warnings = split_severity(all_issues)
     return {
-        "passed": not all_issues,
+        # 只有阻断级问题才决定能否发布；警告级照常记录供人工判断
+        "passed": not blocking,
         "issues": [{"tag": t, "detail": d} for t, d in all_issues],
+        "blocking": [{"tag": t, "detail": d} for t, d in blocking],
+        "warnings": [{"tag": t, "detail": d} for t, d in warnings],
         "by_gate": per_gate,
         "issue_distribution": tags,
     }

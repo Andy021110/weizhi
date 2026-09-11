@@ -65,7 +65,22 @@ FACTUAL_KINDS = ("explanation", "examples", "boundaries")
 
 # 段落上限。真实跑通后发现：不设上限时模型会把一张卡写成一篇综述
 # （一次实测写了 13 段 2192 字），那不是「一目标一卡」，是一篇文章。
-MAX_BLOCKS_PER_KIND = {"explanation": 4, "examples": 3, "boundaries": 3}
+MAX_BLOCKS_PER_KIND = {"explanation": 5, "examples": 3, "boundaries": 3}
+
+# 正文段落的下限。真人盲评反馈「正文被结构字段挤薄」之后加的：
+# 一段解释至少要有「论断 + 一层推演」的量，两句话就收尾的段落不算解释。
+MIN_EXPLANATION_CHARS = 100
+MIN_EXAMPLE_CHARS = 80
+MIN_TRANSFER_CHARS = 15
+
+# 中文技术材料的阅读速度约每分鐘 300-400 字，取中间值估算单卡时长。
+_CHARS_PER_MINUTE = 320
+
+
+def estimate_minutes(draft):
+    """按正文体量估单卡时长（4-15 分钟）。确定性计算，不交给模型。"""
+    prose = sum(len((b.get("text") or "")) for _k, b in iter_blocks(draft))
+    return max(4, min(15, round(prose / _CHARS_PER_MINUTE)))
 
 CARD_DRAFT_SCHEMA = {
     "required": ["schema_version", "objective", "title", "lead", "explanation",
@@ -159,6 +174,109 @@ def validate_card_draft(draft):
         errs.append("estimated_minutes 应为 3-15 的整数（单卡 5-10 分钟预算）")
 
     return errs
+
+
+def _check_blocks(errs, draft, kind, min_chars, min_n, max_n):
+    blocks = draft.get(kind)
+    if blocks is None:
+        errs.append("缺字段: %s" % kind)
+        return
+    if not isinstance(blocks, list):
+        errs.append("%s 应为数组" % kind)
+        return
+    if len(blocks) < min_n:
+        errs.append("%s 只有 %d 段 < %d" % (kind, len(blocks), min_n))
+    if len(blocks) > max_n:
+        errs.append("%s 有 %d 段 > %d（一张卡不是一篇文章）" % (kind, len(blocks), max_n))
+    for i, block in enumerate(blocks):
+        if not isinstance(block, dict):
+            errs.append("%s[%d] 不是对象" % (kind, i))
+            continue
+        text = (block.get("text") or "").strip()
+        if len(text) < min_chars:
+            errs.append("%s[%d].text 过短（%d 字 < %d，没有展开「为什么」）"
+                        % (kind, i, len(text), min_chars))
+        cites = block.get("cites")
+        if not isinstance(cites, list) or not cites:
+            errs.append("%s[%d].cites 为空（事实性段落必须引用证据）" % (kind, i))
+        elif not all(isinstance(c, int) for c in cites):
+            errs.append("%s[%d].cites 必须是整数 claim_idx 数组" % (kind, i))
+
+
+def validate_card_body(body):
+    """校验正文那一次调用的输出（不含边界/关键点/迁移任务）。"""
+    errs = []
+    if not isinstance(body, dict):
+        return ["正文必须是 JSON 对象"]
+    for key in ("schema_version", "objective", "title", "lead", "explanation", "examples"):
+        if key not in body:
+            errs.append("缺字段: %s" % key)
+    if body.get("schema_version") != SCHEMA_VERSION:
+        errs.append("schema_version 应为 %s" % SCHEMA_VERSION)
+
+    objective = (body.get("objective") or "").strip()
+    if not objective:
+        errs.append("objective 为空（卡片必须服务唯一明确的学习目标）")
+    elif len(objective) > 80:
+        errs.append("objective %d 字 >80，说明目标不唯一" % len(objective))
+    if not (body.get("title") or "").strip():
+        errs.append("title 为空")
+    if not (body.get("lead") or "").strip():
+        errs.append("lead 为空")
+
+    _check_blocks(errs, body, "explanation", MIN_EXPLANATION_CHARS, 3, 5)
+    _check_blocks(errs, body, "examples", MIN_EXAMPLE_CHARS, 1, 3)
+    return errs
+
+
+def validate_card_structure(struct):
+    """校验结构那一次调用的输出（边界/关键点/迁移任务）。"""
+    errs = []
+    if not isinstance(struct, dict):
+        return ["结构必须是 JSON 对象"]
+    for key in ("boundaries", "key_points", "transfer_task"):
+        if key not in struct:
+            errs.append("缺字段: %s" % key)
+
+    # 讲不出真实边界时宁可不写，所以 boundaries 允许为空数组，但不许类型错
+    blocks = struct.get("boundaries")
+    if blocks is not None and not isinstance(blocks, list):
+        errs.append("boundaries 应为数组")
+    elif isinstance(blocks, list):
+        if len(blocks) > MAX_BLOCKS_PER_KIND["boundaries"]:
+            errs.append("boundaries 有 %d 条 > %d" % (len(blocks), MAX_BLOCKS_PER_KIND["boundaries"]))
+        for i, block in enumerate(blocks):
+            if not isinstance(block, dict):
+                errs.append("boundaries[%d] 不是对象" % i)
+                continue
+            if len((block.get("text") or "").strip()) < _MIN_BLOCK_TEXT:
+                errs.append("boundaries[%d].text 过短（<%d 字）" % (i, _MIN_BLOCK_TEXT))
+            cites = block.get("cites")
+            if not isinstance(cites, list) or not cites:
+                errs.append("boundaries[%d].cites 为空（边界必须有证据依据）" % i)
+            elif not all(isinstance(c, int) for c in cites):
+                errs.append("boundaries[%d].cites 必须是整数 claim_idx 数组" % i)
+
+    kp = struct.get("key_points")
+    if not isinstance(kp, list) or len(kp) < 2:
+        errs.append("key_points 至少 2 条")
+    elif len(kp) > 5:
+        errs.append("key_points %d 条 >5" % len(kp))
+
+    if len((struct.get("transfer_task") or "").strip()) < MIN_TRANSFER_CHARS:
+        errs.append("transfer_task 过短或缺失（迁移任务是检验是否真学会的关键）")
+    return errs
+
+
+def merge_card(body, struct):
+    """把两次调用的输出合成一份完整 CardDraft。"""
+    draft = dict(body)
+    draft["boundaries"] = (struct or {}).get("boundaries") or []
+    draft["key_points"] = (struct or {}).get("key_points") or []
+    draft["transfer_task"] = (struct or {}).get("transfer_task") or ""
+    # 时长由程序按体量算，不问模型——省一次判断，也避免它自报「7 分钟」糊弄
+    draft["estimated_minutes"] = estimate_minutes(draft)
+    return draft
 
 
 def unknown_cites(draft, claims):
