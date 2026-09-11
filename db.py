@@ -196,6 +196,18 @@ CREATE TABLE IF NOT EXISTS v2_card_drafts (
   created_at TEXT,
   updated_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS ledger_concepts (
+  norm_id TEXT PRIMARY KEY,
+  term TEXT,
+  one_line TEXT,
+  why_matters TEXT,
+  depends_on TEXT,
+  count INTEGER DEFAULT 1,
+  sources TEXT,
+  first_seen TEXT,
+  last_seen TEXT
+);
 """
 
 
@@ -1930,5 +1942,103 @@ def set_v2_learning_pack_status(pack_id, status, card_ids=None):
                 (status, _dump(card_ids), len(card_ids),
                  datetime.now().isoformat(timespec="seconds"), pack_id))
         conn.commit()
+    finally:
+        conn.close()
+
+
+# ==================== 台账互通（ledger_concepts） ====================
+# 与浏览器翻译插件的「读前简报」打通：插件上报遇到的概念，
+# 微知作为掌握度权威源（cards.memory_state），概念用 source_url = "ledger:{norm_id}" 关联到卡。
+
+def upsert_ledger_concept(c, source):
+    """上报一个概念（norm_id 由插件侧算好）。返回 "added" / "updated" / None。
+    c: {norm_id, term, one_line, why_matters, depends_on:list}
+    source: {title, url}
+    """
+    norm_id = (c.get("norm_id") or "").strip()
+    if not norm_id:
+        return None
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = _conn()
+    try:
+        row = conn.execute(
+            "SELECT * FROM ledger_concepts WHERE norm_id = ?", (norm_id,)
+        ).fetchone()
+        if row:
+            new_count = (row["count"] or 0) + 1
+            one_line = c.get("one_line") or ""
+            cur_one = one_line if (one_line and len(one_line) > len(row["one_line"] or "")) else (row["one_line"] or "")
+            deps = json.loads(row["depends_on"]) if row["depends_on"] else []
+            for d in (c.get("depends_on") or []):
+                if d and d not in deps:
+                    deps.append(d)
+            sources = json.loads(row["sources"]) if row["sources"] else []
+            if source and source.get("url") and not any(s.get("url") == source["url"] for s in sources):
+                sources.insert(0, {"title": source.get("title", ""), "url": source["url"]})
+                sources = sources[:5]
+            conn.execute(
+                "UPDATE ledger_concepts SET count=?, one_line=?, why_matters=COALESCE(?, why_matters), "
+                "depends_on=?, sources=?, last_seen=? WHERE norm_id=?",
+                (new_count, cur_one, c.get("why_matters"), _dump(deps), _dump(sources), now, norm_id),
+            )
+            conn.commit()
+            return "updated"
+        conn.execute(
+            "INSERT INTO ledger_concepts (norm_id, term, one_line, why_matters, depends_on, count, sources, first_seen, last_seen) "
+            "VALUES (?,?,?,?,?,1,?,?,?)",
+            (norm_id, c.get("term", ""), c.get("one_line", ""), c.get("why_matters", ""),
+             _dump(c.get("depends_on") or []), _dump([source] if source and source.get("url") else []),
+             now, now),
+        )
+        conn.commit()
+        return "added"
+    finally:
+        conn.close()
+
+
+def ledger_mastery(norm_ids):
+    """查一批概念在 cards 里的掌握状态。返回 {norm_id: {state, review_count} 或 None}。"""
+    out = {}
+    conn = _conn()
+    try:
+        for nid in norm_ids:
+            row = conn.execute(
+                "SELECT memory_state, review_count FROM cards WHERE source_url = ?",
+                ("ledger:" + nid,),
+            ).fetchone()
+            if row:
+                out[nid] = {"state": row["memory_state"] or "learning", "review_count": row["review_count"] or 0}
+            else:
+                out[nid] = None
+    finally:
+        conn.close()
+    return out
+
+
+def load_ledger_from_reading(limit=20, min_count=2):
+    """「从阅读来」清单：遇到次数 >= min_count 且还没生成卡的概念。"""
+    conn = _conn()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM ledger_concepts WHERE count >= ? ORDER BY count DESC, last_seen DESC LIMIT ?",
+            (min_count, limit),
+        ).fetchall()
+        items = []
+        for r in rows:
+            st = conn.execute(
+                "SELECT memory_state FROM cards WHERE source_url = ?", ("ledger:" + r["norm_id"],)
+            ).fetchone()
+            items.append({
+                "norm_id": r["norm_id"],
+                "term": r["term"],
+                "one_line": r["one_line"],
+                "why_matters": r["why_matters"],
+                "count": r["count"],
+                "depends_on": _load(r["depends_on"]) or [],
+                "has_card": bool(st),
+                "last_seen": r["last_seen"],
+            })
+        # 已生成卡的概念（无论 learning/mastered）不再出现在待学清单
+        return [it for it in items if not it["has_card"]]
     finally:
         conn.close()
