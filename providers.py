@@ -87,15 +87,20 @@ def validate_against(data, schema):
     return errs
 
 
-def prompt_fingerprint():
-    """V2 提示词正文的短指纹，用作默认 prompt_version。
+def prompt_fingerprint(task=None):
+    """提示词正文的短指纹，用作默认 prompt_version。
 
-    放进 input_hash 后，任何提示词改动都会自动让缓存失效——不需要人记得改版本号。
+    放进 input_hash 后，提示词一改缓存就失效，不需要人记得手动 bump 版本号。
+
+    **按任务算，不是全量算**：早期版本把 V2_PROMPTS 所有任务拼起来哈希，
+    结果新增一个跟卡片生成无关的提示词（比如目标诊断），
+    会把所有卡片的缓存键一起冲掉，白花钱重生成。
     """
     from prompts import V2_PROMPTS
-    blob = "".join(V2_PROMPTS[k]["system"] + V2_PROMPTS[k]["user"]
-                   for k in sorted(V2_PROMPTS))
-    return "v2fp-" + hashlib.sha256(blob.encode("utf-8")).hexdigest()[:10]
+    keys = sorted(V2_PROMPTS) if task is None else [task]
+    blob = "".join(V2_PROMPTS[k]["system"] + V2_PROMPTS[k]["user"] for k in keys)
+    return "%s-%s" % (task or "all",
+                      hashlib.sha256(blob.encode("utf-8")).hexdigest()[:10])
 
 
 class TextModelProvider:
@@ -108,6 +113,10 @@ class TextModelProvider:
     def __init__(self, max_retries=2, use_cache=True):
         self.max_retries = max_retries
         self.use_cache = use_cache
+
+    def version_for(self, task):
+        """该任务的提示词版本。默认用实例级版本号，子类可按任务细化。"""
+        return self.prompt_version
 
     # --- 子类需要实现的两个方法 ---
 
@@ -134,7 +143,7 @@ class TextModelProvider:
                error=None, cached=0):
         db.save_v2_model_call(
             task=task, provider=self.name, model=self.model,
-            prompt_version=self.prompt_version, input_hash=input_hash,
+            prompt_version=self.version_for(task), input_hash=input_hash,
             output=output, latency_ms=latency_ms,
             prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
             cost=self.estimate_cost(prompt_tokens, completion_tokens),
@@ -147,9 +156,8 @@ class TextModelProvider:
         保证：失败时也留审计行（含 error），但**不写入任何半成品产物**——
         产物由调用方在本方法成功返回后才落库。
         """
-        key = idempotency_key or make_input_hash(
-            task, self.prompt_version, self.name, inputs
-        )
+        version = self.version_for(task)
+        key = idempotency_key or make_input_hash(task, version, self.name, inputs)
 
         if self.use_cache:
             hit = db.find_v2_model_call(key)
@@ -194,10 +202,13 @@ class DeepSeekProvider(TextModelProvider):
     def __init__(self, api_key, prompt_version=None, timeout=60, **kw):
         super().__init__(**kw)
         self.api_key = api_key
-        # 不给版本号就用提示词正文的指纹。改了提示词必然换缓存键——
+        # 不给版本号就按任务用提示词指纹。改了提示词必然换缓存键——
         # 靠人记得手动 bump 版本号是靠不住的，漏一次就会静默复用旧 prompt 的结果。
-        self.prompt_version = prompt_version or prompt_fingerprint()
+        self.prompt_version = prompt_version
         self.timeout = timeout
+
+    def version_for(self, task):
+        return self.prompt_version or prompt_fingerprint(task)
 
     def build_messages(self, task, inputs):
         from prompts import V2_PROMPTS

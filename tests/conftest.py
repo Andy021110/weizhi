@@ -38,6 +38,42 @@ def make_v2_goal(**over):
     return goal
 
 
+def make_probe(sufficient=False, questions=None, **over):
+    """「探」这一步的输出。"""
+    if questions is None:
+        questions = [] if sufficient else [
+            {"question": "你是想能自己搭一个，还是想能评审别人搭的？",
+             "why": "决定卡片的深度是「能动手」还是「能判断」"},
+            {"question": "学完打算在什么场合用？",
+             "why": "决定内容该聚焦哪个场景"},
+        ]
+    data = {
+        "sufficient": sufficient,
+        "missing": [] if sufficient else ["目标能力", "使用场景"],
+        "questions": questions,
+    }
+    data.update(over)
+    return data
+
+
+def make_goalspec(**over):
+    """「写规格」这一步的合规输出（3-7 个里程碑，capability 可观察）。"""
+    spec = {
+        "capability": "能说清 Agent Harness 的循环结构并定位问题出在哪一环",
+        "level": "能读源码但没系统梳理过",
+        "scene": "给团队做一次 20 分钟分享",
+        "success_evidence": "能不查资料画出循环图并逐段标注各阶段职责",
+        "prereq": ["用过 LLM API"],
+        "milestones": [
+            {"name": "说出循环的四个阶段", "evidence": "口头复述不卡壳"},
+            {"name": "画出循环图", "evidence": "图上有四个阶段与数据流向"},
+            {"name": "定位一次失败请求", "evidence": "能指出卡在哪个阶段并说明依据"},
+        ],
+    }
+    spec.update(over)
+    return spec
+
+
 def make_body(**over):
     """第一次调用（写正文）的合规输出。explanation 段数/字数要够过 validate_card_body。"""
     body = {

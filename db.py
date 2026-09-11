@@ -126,6 +126,17 @@ CREATE TABLE IF NOT EXISTS v2_model_calls (
   cached INTEGER DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS v2_goals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  goal_key TEXT,            -- 同一愿望的多个版本共享一个 key
+  version INTEGER DEFAULT 1,
+  raw_input TEXT,           -- 用户原话，永不覆盖
+  spec TEXT,                -- JSON：capability/level/scene/success_evidence/prereq/milestones
+  status TEXT,              -- draft / active / paused / archived
+  created_at TEXT,
+  updated_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS v2_card_drafts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   input_hash TEXT UNIQUE,   -- 同输入不生成重复版本
@@ -1514,6 +1525,108 @@ def set_v2_card_draft_status(draft_id, status, gate_report=None):
         conn.execute(
             "UPDATE v2_card_drafts SET status=?, gate_report=?, updated_at=? WHERE id=?",
             (status, _dump(gate_report), datetime.now().isoformat(timespec="seconds"), draft_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ============================================================
+# v2 侧轨：学习目标（CP9，方案 M2）
+#
+# 目标必须版本化。方案 M2 验收要求「用户修改目标后旧学习记录保留」——
+# 所以改目标不是 UPDATE，而是插入新版本；旧版本留在库里，
+# 已有的学习记录仍指向它，历史不会被改写。
+# ============================================================
+
+def save_v2_goal(goal_key, raw_input, spec, status="draft"):
+    """写入一个新版本的学习目标，返回 (goal_id, version)。
+
+    同 goal_key 再次调用即升版本。raw_input 永远保留用户原话，
+    这是之后判断「系统有没有曲解他的意图」的唯一依据。
+    """
+    now = datetime.now().isoformat(timespec="seconds")
+    conn = _conn()
+    try:
+        row = conn.execute(
+            "SELECT MAX(version) AS v FROM v2_goals WHERE goal_key = ?", (goal_key,)
+        ).fetchone()
+        version = (row["v"] or 0) + 1
+        cur = conn.execute(
+            "INSERT INTO v2_goals (goal_key, version, raw_input, spec, status, "
+            "created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
+            (goal_key, version, raw_input, _dump(spec), status, now, now),
+        )
+        conn.commit()
+        return cur.lastrowid, version
+    finally:
+        conn.close()
+
+
+def get_v2_goal(goal_id):
+    conn = _conn()
+    try:
+        row = conn.execute("SELECT * FROM v2_goals WHERE id = ?", (goal_id,)).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return None
+    d = dict(row)
+    d["spec"] = _load(d.get("spec"))
+    return d
+
+
+def latest_v2_goal(goal_key, status=None):
+    """取某 goal_key 的最新版本；给 status 则只在该状态里找。"""
+    conn = _conn()
+    try:
+        if status:
+            row = conn.execute(
+                "SELECT * FROM v2_goals WHERE goal_key = ? AND status = ? "
+                "ORDER BY version DESC LIMIT 1", (goal_key, status),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT * FROM v2_goals WHERE goal_key = ? ORDER BY version DESC LIMIT 1",
+                (goal_key,),
+            ).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return None
+    d = dict(row)
+    d["spec"] = _load(d.get("spec"))
+    return d
+
+
+def list_v2_goals(status=None, limit=50):
+    conn = _conn()
+    try:
+        if status:
+            rows = conn.execute(
+                "SELECT * FROM v2_goals WHERE status = ? ORDER BY id DESC LIMIT ?",
+                (status, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM v2_goals ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+    finally:
+        conn.close()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["spec"] = _load(d.get("spec"))
+        out.append(d)
+    return out
+
+
+def set_v2_goal_status(goal_id, status):
+    conn = _conn()
+    try:
+        conn.execute(
+            "UPDATE v2_goals SET status=?, updated_at=? WHERE id=?",
+            (status, datetime.now().isoformat(timespec="seconds"), goal_id),
         )
         conn.commit()
     finally:
