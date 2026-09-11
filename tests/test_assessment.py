@@ -10,6 +10,7 @@ from providers import FakeTextProvider
 
 GOOD_ITEM = {
     "objective": "能说清循环由哪四个阶段组成",
+    "layer": "immediate",
     "cites": [0],
     "question": "Agent Harness 的核心循环包含以下哪一组阶段？",
     "options": ["上下文组装、模型调用、工具执行、状态回写",
@@ -55,6 +56,45 @@ def test_rejects_bad_item(mutate, expect):
     mutate(item)
     errs = assessment.validate_quiz({"items": [item]})
     assert errs and any(expect in e for e in errs), errs
+
+
+def test_layer_is_required_and_validated():
+    """范围决策 D2：随堂题与复习题合并为分层题库。"""
+    bad = dict(GOOD_ITEM, layer="第三层")
+    errs = assessment.validate_quiz({"items": [bad]})
+    assert any("layer" in e for e in errs)
+    # 每种合法 layer 都要能通过（day1/day7 需与 immediate 搭配，见下一条用例）
+    for layer in assessment.LAYERS:
+        items = [dict(GOOD_ITEM, layer="immediate")]
+        if layer != "immediate":
+            items.append(dict(GOOD_ITEM, layer=layer))
+        assert assessment.validate_quiz({"items": items}) == [], layer
+
+
+def test_needs_at_least_one_immediate():
+    """学完当场必须能测——分层不能全堆到 7 天后。"""
+    only_day7 = [dict(GOOD_ITEM, layer="day7")]
+    errs = assessment.validate_quiz({"items": only_day7})
+    assert any("immediate" in e for e in errs)
+
+
+def test_single_question_is_enough():
+    """范围决策 D1：「每卡三道题」已废除，单一判断目标一道好题就够。"""
+    assert assessment.validate_quiz({"items": [dict(GOOD_ITEM, layer="immediate")]}) == []
+
+
+def test_count_is_optional_and_hint_is_adaptive():
+    """不传 count 时由目标决定题量，不是写死 3。"""
+    inputs = assessment.build_inputs({"objective": "x", "title": "t"}, [], None)
+    assert "由学习目标决定" in inputs["count_hint"]
+    forced = assessment.build_inputs({"objective": "x", "title": "t"}, [], 2)
+    assert "固定出 2 道" in forced["count_hint"]
+
+
+def test_by_layer():
+    items = [dict(GOOD_ITEM, layer="immediate"), dict(GOOD_ITEM, layer="day7")]
+    assert len(assessment.by_layer(items, "day7")) == 1
+    assert assessment.by_layer(items, "day1") == []
 
 
 def test_error_reason_is_required():

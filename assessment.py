@@ -30,8 +30,14 @@ import db
 import mastery
 
 TASK = "quiz_gen"
-DEFAULT_COUNT = 3
+
+# 题量由学习目标决定，不是固定三道（范围决策 D1）。
+# 传 None 时交给模型按目标判断；MAX_COUNT 只是防跑飞的安全上限，
+# 不是产品规则——「每卡三道题」已被明确废除。
 MAX_COUNT = 5
+LAYERS = ("immediate", "day1", "day7")
+LAYER_HINT = ("由学习目标决定数量：单一判断目标出 1 道，"
+              "同时含概念、边界与迁移的目标才出 3 道。宁可少出，不要拿同义重复凑数。")
 
 # 语面歧义套路：出现即判坏题
 _AMBIGUOUS = re.compile(r"(以上都|以上均|都不对|都正确|全部正确|以上皆)")
@@ -86,6 +92,13 @@ def validate_quiz(data):
         # 方案 M4：用户要能看到错误原因，不能只给正确答案
         if not (item.get("error_reason") or "").strip():
             errs.append("items[%d].error_reason 为空（选错了要知道错在哪）" % i)
+        # 范围决策 D2：随堂题与复习题合并为分层题库
+        layer = item.get("layer")
+        if layer not in LAYERS:
+            errs.append("items[%d].layer=%r 不在 %s 里" % (i, layer, "/".join(LAYERS)))
+    if items and all(isinstance(x, dict) for x in items):
+        if not any(x.get("layer") == "immediate" for x in items):
+            errs.append("至少要有一道 layer=immediate 的题（学完当场要能测）")
     return errs
 
 
@@ -186,17 +199,17 @@ def quality_report(items):
 
 # ---------- 生成 ----------
 
-def build_inputs(draft, claims, count=DEFAULT_COUNT):
+def build_inputs(draft, claims, count=None):
     import card_writer
     return {
         "objective": draft.get("objective") or "",
         "body_block": card_writer.render_body(draft),
         "evidence_block": card_writer.render_evidence(claims or []),
-        "count": count,
+        "count_hint": ("固定出 %d 道。" % count) if count else LAYER_HINT,
     }
 
 
-def generate(provider, draft, claims, concept=None, count=DEFAULT_COUNT, draft_id=None):
+def generate(provider, draft, claims, concept=None, count=None, draft_id=None):
     """出题并落库。答错的题会被门禁拦下重试（由 Provider 负责重试次数）。
 
     返回 (items, report)。
@@ -320,6 +333,11 @@ def submit(goal_key, concept, draft_id, question_idx, chosen, confidence=None,
         "mastery_after": state["score"],
         "next_review_at": state["next_review_at"],
     }, "ok"
+
+
+def by_layer(items, layer):
+    """按时间层取题。范围决策 D2：学完立即 / 24h / 7 天，不再分两套题库。"""
+    return [it for it in (items or []) if it.get("layer") == layer]
 
 
 def _guess_error_type(item, chosen):

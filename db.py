@@ -126,6 +126,19 @@ CREATE TABLE IF NOT EXISTS v2_model_calls (
   cached INTEGER DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS v2_learning_packs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  goal_key TEXT,
+  milestone_id TEXT,        -- 这个包补的是哪个里程碑
+  status TEXT,              -- planned / ready / published / archived
+  reason TEXT,              -- 为什么推荐这个包（可解释性，方案 M2 要求）
+  card_ids TEXT,            -- JSON 数组：这个包包含哪些卡片草稿
+  entry_count INTEGER DEFAULT 0,
+  failed TEXT,              -- JSON：生成失败的条目及原因，不静默吞掉
+  created_at TEXT,
+  updated_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS v2_mastery (
   goal_key TEXT,
   concept TEXT,             -- 里程碑 id（m1…）或概念键
@@ -1826,3 +1839,83 @@ def save_v2_draft_assessment(draft_id, items):
 
 def get_v2_draft_assessment(draft_id):
     return (get_v2_card_draft_by_id(draft_id) or {}).get("assessment")
+
+
+# ============================================================
+# v2 侧轨：学习包（CP15 / 范围决策 D3）
+#
+# 范围决策把 LearningPack 列为八个核心实体之一，而此前 planner 只返回一个
+# 内存里的 dict —— 没有落库就意味着「一次 20-30 分钟的完整学习」这件事
+# 在数据层不存在，掌握度也就无从按包归因。
+# ============================================================
+
+def save_v2_learning_pack(goal_key, milestone_id, reason, card_ids=None,
+                          status="planned", failed=None):
+    now = datetime.now().isoformat(timespec="seconds")
+    conn = _conn()
+    try:
+        cur = conn.execute(
+            "INSERT INTO v2_learning_packs (goal_key, milestone_id, status, reason, "
+            "card_ids, entry_count, failed, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (goal_key, milestone_id, status, reason, _dump(card_ids or []),
+             len(card_ids or []), _dump(failed or []), now, now),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def _pack_row(row):
+    d = dict(row)
+    d["card_ids"] = _load(d.get("card_ids")) or []
+    d["failed"] = _load(d.get("failed")) or []
+    return d
+
+
+def get_v2_learning_pack(pack_id):
+    conn = _conn()
+    try:
+        row = conn.execute("SELECT * FROM v2_learning_packs WHERE id = ?", (pack_id,)).fetchone()
+    finally:
+        conn.close()
+    return _pack_row(row) if row else None
+
+
+def list_v2_learning_packs(goal_key=None, status=None, limit=50):
+    conn = _conn()
+    try:
+        where, args = [], []
+        if goal_key:
+            where.append("goal_key = ?")
+            args.append(goal_key)
+        if status:
+            where.append("status = ?")
+            args.append(status)
+        sql = "SELECT * FROM v2_learning_packs"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY id DESC LIMIT ?"
+        args.append(limit)
+        rows = conn.execute(sql, args).fetchall()
+    finally:
+        conn.close()
+    return [_pack_row(r) for r in rows]
+
+
+def set_v2_learning_pack_status(pack_id, status, card_ids=None):
+    conn = _conn()
+    try:
+        if card_ids is None:
+            conn.execute("UPDATE v2_learning_packs SET status=?, updated_at=? WHERE id=?",
+                         (status, datetime.now().isoformat(timespec="seconds"), pack_id))
+        else:
+            conn.execute(
+                "UPDATE v2_learning_packs SET status=?, card_ids=?, entry_count=?, "
+                "updated_at=? WHERE id=?",
+                (status, _dump(card_ids), len(card_ids),
+                 datetime.now().isoformat(timespec="seconds"), pack_id))
+        conn.commit()
+    finally:
+        conn.close()

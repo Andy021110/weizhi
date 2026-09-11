@@ -180,6 +180,11 @@ def materialize(provider, plan, spec=None, max_cards=None):
     concept = plan["milestone"]["id"]
     gap = plan["gap"]
 
+    # 先把包落库再逐张生成：范围为「一次 20-30 分钟的完整学习」，
+    # 它是八个核心实体之一，不能只活在内存里（范围决策 D3）。
+    pack_id = _db.save_v2_learning_pack(
+        goal_key, concept, plan.get("reason") or "", status="planned")
+
     written, failed = [], []
     for card in (plan["cards"] if max_cards is None else plan["cards"][:max_cards]):
         src = _db.get_v2_source_by_id(card["source_id"])
@@ -210,7 +215,12 @@ def materialize(provider, plan, spec=None, max_cards=None):
                         "source_id": card["source_id"],
                         "passed": report["passed"], "concept": concept})
 
-    return {"written": written, "failed": failed, "concept": concept,
+    # 全部失败时包状态回退为 failed，不留一个「看起来有内容」的空包
+    status = "ready" if written else "failed"
+    _db.set_v2_learning_pack_status(
+        pack_id, status, card_ids=[w["draft_id"] for w in written])
+    return {"pack_id": pack_id, "status": status,
+            "written": written, "failed": failed, "concept": concept,
             "gap": gap, "reason": plan.get("reason")}
 
 
