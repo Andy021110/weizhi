@@ -176,6 +176,7 @@ CREATE TABLE IF NOT EXISTS v2_card_drafts (
   concept TEXT,             -- 映射到的里程碑 id（方案 M2：每张卡都要能映射）
   capability_gap TEXT,      -- 这张卡补的是哪个能力缺口（可解释性）
   figures TEXT,             -- JSON：配图方案（含要解释的命题/图形语法/alt/图注/读图结论）
+  assessment TEXT,          -- JSON：题目集（每题绑定学习目标与证据）
   status TEXT,              -- draft / published / rejected
   payload TEXT,             -- JSON 字符串
   gate_report TEXT,         -- JSON 字符串，质量门禁结果
@@ -231,6 +232,7 @@ def _migrate():
             ("concept", "ALTER TABLE v2_card_drafts ADD COLUMN concept TEXT"),
             ("capability_gap", "ALTER TABLE v2_card_drafts ADD COLUMN capability_gap TEXT"),
             ("figures", "ALTER TABLE v2_card_drafts ADD COLUMN figures TEXT"),
+            ("assessment", "ALTER TABLE v2_card_drafts ADD COLUMN assessment TEXT"),
         ):
             if dcols and col not in dcols:
                 conn.execute(ddl)
@@ -1533,6 +1535,7 @@ def get_v2_card_draft(input_hash):
     d["payload"] = _load(d.get("payload"))
     d["gate_report"] = _load(d.get("gate_report"))
     d["figures"] = _load(d.get("figures"))
+    d["assessment"] = _load(d.get("assessment"))
     return d
 
 
@@ -1549,6 +1552,7 @@ def get_v2_card_draft_by_id(draft_id):
     d["payload"] = _load(d.get("payload"))
     d["gate_report"] = _load(d.get("gate_report"))
     d["figures"] = _load(d.get("figures"))
+    d["assessment"] = _load(d.get("assessment"))
     return d
 
 
@@ -1572,6 +1576,7 @@ def list_v2_card_drafts(status=None, limit=50):
         d["payload"] = _load(d.get("payload"))
         d["gate_report"] = _load(d.get("gate_report"))
         d["figures"] = _load(d.get("figures"))
+        d["assessment"] = _load(d.get("assessment"))
         out.append(d)
     return out
 
@@ -1804,3 +1809,20 @@ def save_v2_draft_figures(draft_id, figures):
 def get_v2_draft_figures(draft_id):
     row = get_v2_card_draft_by_id(draft_id)
     return (row or {}).get("figures")
+
+
+def save_v2_draft_assessment(draft_id, items):
+    """把题目集挂到草稿上。题目离开这张卡就没有意义，不单独建表。"""
+    conn = _conn()
+    try:
+        conn.execute(
+            "UPDATE v2_card_drafts SET assessment=?, updated_at=? WHERE id=?",
+            (_dump(items), datetime.now().isoformat(timespec="seconds"), draft_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_v2_draft_assessment(draft_id):
+    return (get_v2_card_draft_by_id(draft_id) or {}).get("assessment")
