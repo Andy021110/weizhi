@@ -126,6 +126,35 @@ CREATE TABLE IF NOT EXISTS v2_model_calls (
   cached INTEGER DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS v2_mastery (
+  goal_key TEXT,
+  concept TEXT,             -- 里程碑 id（m1…）或概念键
+  score REAL DEFAULT 0.3,   -- 掌握度 0-1
+  attempts INTEGER DEFAULT 0,
+  correct INTEGER DEFAULT 0,
+  interval_days REAL DEFAULT 1,
+  ease REAL DEFAULT 2.5,
+  last_review_at TEXT,
+  next_review_at TEXT,
+  updated_at TEXT,
+  PRIMARY KEY (goal_key, concept)
+);
+
+CREATE TABLE IF NOT EXISTS v2_review_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  goal_key TEXT,
+  concept TEXT,
+  draft_id INTEGER,
+  question_idx INTEGER,
+  correct INTEGER,
+  confidence REAL,          -- 作答时的自评置信度 0-1
+  elapsed_ms INTEGER,
+  hint_used INTEGER DEFAULT 0,
+  error_type TEXT,          -- 概念混淆 / 数字记错 / 条件漏掉 / 猜的
+  detail TEXT,
+  created_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS v2_goals (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   goal_key TEXT,            -- 同一愿望的多个版本共享一个 key
@@ -144,6 +173,8 @@ CREATE TABLE IF NOT EXISTS v2_card_drafts (
   source_id INTEGER,
   goal_key TEXT,
   objective TEXT,
+  concept TEXT,             -- 映射到的里程碑 id（方案 M2：每张卡都要能映射）
+  capability_gap TEXT,      -- 这张卡补的是哪个能力缺口（可解释性）
   status TEXT,              -- draft / published / rejected
   payload TEXT,             -- JSON 字符串
   gate_report TEXT,         -- JSON 字符串，质量门禁结果
@@ -193,6 +224,15 @@ def _migrate():
                 conn.execute(ddl)
 
         # plans 表补规模档/节奏档/批次/类型字段
+        # v2 侧轨也要能增量迁移：老库里的 v2_card_drafts 没有 concept / capability_gap
+        dcols = [r["name"] for r in conn.execute("PRAGMA table_info(v2_card_drafts)").fetchall()]
+        for col, ddl in (
+            ("concept", "ALTER TABLE v2_card_drafts ADD COLUMN concept TEXT"),
+            ("capability_gap", "ALTER TABLE v2_card_drafts ADD COLUMN capability_gap TEXT"),
+        ):
+            if dcols and col not in dcols:
+                conn.execute(ddl)
+
         pcols = [r["name"] for r in conn.execute("PRAGMA table_info(plans)").fetchall()]
         for col, ddl in (
             ("scale", "ALTER TABLE plans ADD COLUMN scale INTEGER DEFAULT 20"),
@@ -1305,6 +1345,16 @@ def save_v2_source(url, title=None, site=None, lang=None, content_hash=None,
         conn.close()
 
 
+def get_v2_source_by_id(source_id):
+    """按 id 取信源（规划器拿到的计划里只有 source_id）。"""
+    conn = _conn()
+    try:
+        row = conn.execute("SELECT * FROM v2_sources WHERE id = ?", (source_id,)).fetchone()
+    finally:
+        conn.close()
+    return dict(row) if row else None
+
+
 def get_v2_source(url):
     """按 url 取信源，没有则 None。"""
     conn = _conn()
@@ -1435,7 +1485,8 @@ def recent_v2_model_calls(limit=50, task=None):
 # ============================================================
 
 def save_v2_card_draft(input_hash, schema_version, payload, source_id=None,
-                       goal_key=None, objective=None, status="draft", gate_report=None):
+                       goal_key=None, objective=None, status="draft", gate_report=None,
+                       concept=None, capability_gap=None):
     """写入/更新一份草稿。同 input_hash 视为同一份，返回 id。"""
     now = datetime.now().isoformat(timespec="seconds")
     conn = _conn()
@@ -1446,18 +1497,19 @@ def save_v2_card_draft(input_hash, schema_version, payload, source_id=None,
         if row:
             conn.execute(
                 "UPDATE v2_card_drafts SET schema_version=?, payload=?, status=?, "
-                "gate_report=?, objective=?, updated_at=? WHERE id=?",
+                "gate_report=?, objective=?, concept=COALESCE(?, concept), "
+                "capability_gap=COALESCE(?, capability_gap), updated_at=? WHERE id=?",
                 (schema_version, _dump(payload), status, _dump(gate_report),
-                 objective, now, row["id"]),
+                 objective, concept, capability_gap, now, row["id"]),
             )
             conn.commit()
             return row["id"]
         cur = conn.execute(
             "INSERT INTO v2_card_drafts (input_hash, schema_version, source_id, goal_key, "
-            "objective, status, payload, gate_report, created_at, updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (input_hash, schema_version, source_id, goal_key, objective, status,
-             _dump(payload), _dump(gate_report), now, now),
+            "objective, concept, capability_gap, status, payload, gate_report, "
+            "created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (input_hash, schema_version, source_id, goal_key, objective, concept,
+             capability_gap, status, _dump(payload), _dump(gate_report), now, now),
         )
         conn.commit()
         return cur.lastrowid
@@ -1631,3 +1683,100 @@ def set_v2_goal_status(goal_id, status):
         conn.commit()
     finally:
         conn.close()
+
+
+# ============================================================
+# v2 侧轨：掌握度与复习记录（CP10，方案 M2/M4）
+#
+# 掌握度按 (goal_key, concept) 存，concept 用里程碑 id。
+# 这样「每张卡映射到一个里程碑」之后，卡片的表现能直接汇总成里程碑的掌握度，
+# 而掌握度又反过来决定下一个学习包做哪个里程碑。
+#
+# 复习记录单独一张表：掌握度是可以重算的汇总，记录是不可再生的原始事实。
+# 两者分开，将来换掌握度算法时不用重跑历史。
+# ============================================================
+
+def upsert_v2_mastery(goal_key, concept, **fields):
+    """写入/更新一条掌握度。只更新传入的字段。"""
+    now = datetime.now().isoformat(timespec="seconds")
+    conn = _conn()
+    try:
+        row = conn.execute(
+            "SELECT * FROM v2_mastery WHERE goal_key = ? AND concept = ?",
+            (goal_key, concept),
+        ).fetchone()
+        if not row:
+            conn.execute(
+                "INSERT INTO v2_mastery (goal_key, concept, score, updated_at) VALUES (?,?,?,?)",
+                (goal_key, concept, fields.get("score", 0.3), now),
+            )
+        if fields:
+            cols = ", ".join("%s = ?" % k for k in fields)
+            conn.execute(
+                "UPDATE v2_mastery SET %s, updated_at = ? WHERE goal_key = ? AND concept = ?"
+                % cols,
+                list(fields.values()) + [now, goal_key, concept],
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_v2_mastery(goal_key, concept=None):
+    """不给 concept 则返回该目标的 {concept: state}。"""
+    conn = _conn()
+    try:
+        if concept is not None:
+            row = conn.execute(
+                "SELECT * FROM v2_mastery WHERE goal_key = ? AND concept = ?",
+                (goal_key, concept),
+            ).fetchone()
+            return dict(row) if row else None
+        rows = conn.execute(
+            "SELECT * FROM v2_mastery WHERE goal_key = ?", (goal_key,)
+        ).fetchall()
+    finally:
+        conn.close()
+    return {r["concept"]: dict(r) for r in rows}
+
+
+def log_v2_review(goal_key, concept, correct, draft_id=None, question_idx=None,
+                  confidence=None, elapsed_ms=None, hint_used=False,
+                  error_type=None, detail=None):
+    """记一次作答。这些字段是方案 M4 要求留存的分析素材。"""
+    conn = _conn()
+    try:
+        cur = conn.execute(
+            "INSERT INTO v2_review_log (goal_key, concept, draft_id, question_idx, "
+            "correct, confidence, elapsed_ms, hint_used, error_type, detail, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (goal_key, concept, draft_id, question_idx,
+             1 if correct else 0, confidence, elapsed_ms,
+             1 if hint_used else 0, error_type, detail,
+             datetime.now().isoformat(timespec="seconds")),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def list_v2_reviews(goal_key=None, concept=None, limit=100):
+    conn = _conn()
+    try:
+        where, args = [], []
+        if goal_key:
+            where.append("goal_key = ?")
+            args.append(goal_key)
+        if concept:
+            where.append("concept = ?")
+            args.append(concept)
+        sql = "SELECT * FROM v2_review_log"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY id DESC LIMIT ?"
+        args.append(limit)
+        rows = conn.execute(sql, args).fetchall()
+    finally:
+        conn.close()
+    return [dict(r) for r in rows]
