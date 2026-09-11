@@ -257,28 +257,37 @@ def build_pair(material, goal, provider, v1_provider=None):
     }
 
 
-def _render_version(v):
-    lines = ["**目标**：" + (v.get("objective") or "（规则版不设定学习目标）"), ""]
-    lines.append("**导语**：" + (v.get("lead") or "（无）"))
-    lines.append("")
-    lines.append("**正文**：")
-    lines.append("")
-    lines.append(v.get("body") or "（无）")
-    lines.append("")
+def _render_version(v, mode="body"):
+    """渲染一个版本。
+
+    mode="body" 只出标题/导语/正文/关键点，把「有没有迁移任务和引用」这类
+    结构差异藏起来——否则读者一眼认出新方案，盲评就不成盲评了。
+    mode="full" 出全部字段，但**绝不标注版本身份**：空字段整行省略，
+    不写「规则版」「（无）」这些字——它们等于直接告诉读者哪版是新的。
+    """
+    lines = []
+    if v.get("title"):
+        lines += ["**标题**：" + v["title"], ""]
+    if v.get("lead"):
+        lines += ["**导语**：" + v["lead"], ""]
+    lines += ["**正文**：", "", v.get("body") or "", ""]
     if v.get("key_points"):
         lines.append("**关键点**：")
         lines.extend("- " + str(k) for k in v["key_points"])
         lines.append("")
+
+    if mode == "body":
+        return "\n".join(lines).strip()
+
+    if v.get("objective"):
+        lines += ["**学习目标**：" + v["objective"], ""]
     if v.get("boundaries"):
-        lines.append("**边界**：" + v["boundaries"])
-        lines.append("")
-    lines.append("**迁移任务**：" + (v.get("transfer_task") or "（无）"))
-    lines.append("")
-    lines.append("**引用证据编号**：" + ", ".join("#%s" % c for c in (v.get("cites") or [])))
-    if v["version"] == "model" and v.get("gate_issues"):
-        lines.append("")
-        lines.append("**门禁拦截**：" + "、".join(v["gate_issues"]))
-    return "\n".join(lines)
+        lines += ["**边界**：" + v["boundaries"], ""]
+    if v.get("transfer_task"):
+        lines += ["**迁移任务**：" + v["transfer_task"], ""]
+    if v.get("cites"):
+        lines.append("**引用证据编号**：" + ", ".join("#%s" % c for c in v["cites"]))
+    return "\n".join(lines).strip()
 
 
 def blind_pairs(pairs, seed):
@@ -298,9 +307,10 @@ def blind_pairs(pairs, seed):
     return blinded
 
 
-def render_blind_md(blinded, seed, provider_kind="fake"):
+def render_blind_md(blinded, seed, provider_kind="fake", mode="body"):
+    heading = "盲评材料（M1 A/B）· 只看正文" if mode == "body" else "材料全文（M1 A/B）"
     out = [
-        "# 盲评材料（M1 A/B）",
+        "# " + heading,
         "",
         "> 生成时间：%s ｜ 随机种子：%s ｜ Provider：%s"
         % (datetime.now().strftime("%Y-%m-%d %H:%M"), seed, provider_kind),
@@ -309,6 +319,13 @@ def render_blind_md(blinded, seed, provider_kind="fake"):
         "> 请先读完一组再打分，不要在两版之间来回对照细节。",
         "> 评判依据是「是否真的有助于学会」，不是「哪版写得更漂亮」。",
     ]
+    if mode == "body":
+        out += [
+            ">",
+            "> 这一份**只渲染了标题/导语/正文/关键点**，刻意隐去了学习目标、边界、",
+            "> 迁移任务和引用——那些字段的有无本身就是新旧方案的差异，露出来就不叫盲评了。",
+            "> 想看完整字段请读 `blind_full.md`（看完就知道哪版是哪个，建议最后再看）。",
+        ]
     if provider_kind == "fake":
         out += [
             ">",
@@ -324,7 +341,7 @@ def render_blind_md(blinded, seed, provider_kind="fake"):
         for label in ("A", "B"):
             out.append("### 版本 %s" % label)
             out.append("")
-            out.append(_render_version(item[label]))
+            out.append(_render_version(item[label], mode))
             out.append("")
     return "\n".join(out)
 
@@ -439,8 +456,10 @@ def main(argv=None):
 
     outdir = os.path.join(args.out, datetime.now().strftime("%Y-%m-%d"))
     os.makedirs(outdir, exist_ok=True)
-    _write(os.path.join(outdir, "blind.md"),
-           render_blind_md(blinded, args.seed, args.provider))
+    _write(os.path.join(outdir, "blind_body.md"),
+           render_blind_md(blinded, args.seed, args.provider, "body"))
+    _write(os.path.join(outdir, "blind_full.md"),
+           render_blind_md(blinded, args.seed, args.provider, "full"))
     _write(os.path.join(outdir, "score_sheet.md"), render_score_md(blinded, args.seed))
     _write(os.path.join(outdir, "answers.json"),
            json.dumps({"seed": args.seed,
@@ -477,17 +496,27 @@ def _fake_draft(inputs):
         "title": "【合成】" + (inputs.get("source_title") or "未命名材料"),
         "lead": "这是 Fake Provider 产出的合成内容，仅用于验证脚手架链路是否跑通，不代表真实生成质量。",
         "explanation": [
-            {"text": "（合成文本）该机制由若干相互衔接的环节组成，每个环节都把上一环的输出当成自己的输入，"
-                     "因此判断问题出在哪一环，比笼统地评价整体表现更有用。",
+            {"text": "（合成文本）该机制由若干相互衔接的环节组成，每个环节都把上一环的输出当成自己的输入。"
+                     "理解了这一点就能解释为什么判断问题出在哪一环，比笼统地评价整体表现更有用："
+                     "整体表现只是一个结果，环节才是可以下手改的地方。",
              "cites": [a, b]},
+            {"text": "（合成文本）这些环节不是并列关系而是串联关系，顺序本身携带信息。"
+                     "跳过中间任何一环，后面的环节就拿不到它需要的东西，于是表现会突然崩掉而不是平滑下降——"
+                     "这种「断崖式」的失败模式，正是判断哪一环掉了的最实用线索。"
+                     "也因此，优化时盯着整体指标往往看不出该改哪一环，必须先把链条拆开看。",
+             "cites": [b]},
         ],
         "examples": [
-            {"text": "（合成文本）一次完整调用会按顺序走完这些环节，中途任一步的结果都会被记录，"
-                     "这也是它可观测、可调试的原因。",
+            {"text": "（合成文本）一次完整调用会按顺序走完这些环节，中途任一步的结果都会被记录下来。"
+                     "这份记录不只是日志，它同时是下一环的输入、也是事后复盘的依据，"
+                     "所以这整个机制天然是可观测、可调试的。反过来说，如果你看不到中间环节，"
+                     "就只能对着最终结果猜，排查成本会高一个量级。",
              "cites": [b]},
         ],
         "boundaries": [
-            {"text": "（合成文本）这套划分来自材料给出的场景；换到材料未覆盖的场景时，需要先验证前提是否还成立。",
+            {"text": "（合成文本）这套划分来自材料给出的场景；换到材料未覆盖的场景时，"
+                     "需要先验证前提是否还成立，不能直接照搬。"
+                     "这一点容易被忽略：结构看起来是通用的，但它成立的前提往往写在材料里而不是标题里。",
              "cites": [c]},
         ],
         "key_points": ["由若干相互衔接的环节组成", "上一环输出即下一环输入", "每个环节都是可观测的调试点"],

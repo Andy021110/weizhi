@@ -226,3 +226,64 @@ def test_too_many_blocks_is_rejected_by_schema():
     ]
     errs = schema_v2.validate_card_draft(draft)
     assert any("一张卡不是一篇文章" in e for e in errs)
+
+
+def test_thousands_separator_does_not_false_positive():
+    """证据写 8,192，模型写 8192——是同一个数字，不是编造。"""
+    claims = [{"claim_idx": 0, "kind": "fact",
+               "text": "Approximately 385M parameters, context length up to 8,192, flexible forecast lengths."}]
+    draft = make_draft()
+    draft["explanation"] = [
+        {"text": "参数量约 385M，上下文长度最高 8192，预测长度灵活，覆盖大多数常见时序场景。",
+         "cites": [0]},
+    ]
+    assert card_gates.check_number_consistency(draft, claims) == []
+
+
+def test_model_name_digits_are_not_checked():
+    """PatchTST-FM-r2、Apache-2.0 里的数字是名字，不是可核验事实。"""
+    claims = [{"claim_idx": 0, "kind": "fact",
+               "text": "The model is permissively licensed and open."}]
+    draft = make_draft()
+    draft["boundaries"] = [
+        {"text": "该模型采用 Apache-2.0 与 OpenMDW-1.0 双许可；它是 PatchTST-FM-r1 的升级版。",
+         "cites": [0]},
+    ]
+    assert card_gates.check_number_consistency(draft, claims) == []
+
+
+def test_real_version_number_is_still_checked():
+    """真版本号（v3.1.4）不能被上面的豁免一起放过。"""
+    claims = [{"claim_idx": 0, "kind": "fact", "text": "Released in version 2.4.1 of the library."}]
+    draft = make_draft()
+    draft["boundaries"] = [
+        {"text": "该能力从 v3.1.4 开始提供，旧版本需要额外适配。", "cites": [0]},
+    ]
+    assert card_gates.check_number_consistency(draft, claims)
+
+
+def test_miscited_number_is_distinguished_from_fabrication():
+    """数字是真的但引错了条目 ≠ 编造。两者严重性不同，不能混在一个标签里。"""
+    claims = [
+        {"claim_idx": 0, "kind": "fact", "text": "该研究发表于 2024 年。"},
+        {"claim_idx": 1, "kind": "fact", "text": "实验覆盖 12 个数据集，结论稳定。"},
+    ]
+    draft = make_draft()
+    draft["boundaries"] = [
+        {"text": "这套结论覆盖 12 个数据集，样本量足够支撑。", "cites": [0]},
+    ]
+    issues = card_gates.check_number_consistency(draft, claims)
+    assert any(t == "数字与引用不符" for t, _ in issues)
+    assert not any(t == "数字无出处" for t, _ in issues)
+
+
+def test_number_absent_everywhere_is_fabrication():
+    claims = [
+        {"claim_idx": 0, "kind": "fact", "text": "该研究发表于 2024 年。"},
+        {"claim_idx": 1, "kind": "fact", "text": "实验覆盖 12 个数据集，结论稳定。"},
+    ]
+    draft = make_draft()
+    draft["boundaries"] = [
+        {"text": "在 2027 年的复现中准确率达到 99.4%，结论依然成立。", "cites": [0, 1]},
+    ]
+    assert any(t == "数字无出处" for t, _ in card_gates.check_number_consistency(draft, claims))

@@ -18,12 +18,14 @@ import schema_v2
 from prompts import BANNED_PHRASES
 
 # 宽口径护栏：只挡空壳与灌水，不写死「必须 800-1000 字」
-MIN_BODY_CHARS = 200
-MAX_BODY_CHARS = 2000
-MIN_PROSE_CHARS = 120          # 解释+例子+边界的最少字数，防止只有干条条
+MIN_BODY_CHARS = 450
+MAX_BODY_CHARS = 2400
+# 解释+例子+边界的最少字数。原先设 120 太松，放过了一批「骨架卡」：
+# 目标、引用、迁移任务一应俱全，但每条 explanation 只有两句话，读完还是不懂。
+# 真人反馈「有边界和迁移任务的卡，正文都被挤短了」之后提到 450，
+# 让「不能为了结构牺牲解释」变成可强制的阈值，而不是提示词里的一句请求。
+MIN_PROSE_CHARS = 450
 MIN_BLOCKS = 2                 # 事实性段落总数下限
-
-_CLAIM_INDEX = {}
 
 
 def _claim_text(claims):
@@ -56,16 +58,25 @@ def check_number_consistency(draft, claims=None):
     """
     issues = []
     texts = {k: schema_v2.normalize_numbers(v) for k, v in _claim_text(claims).items()}
+    # 全部证据拼在一起，用来区分「编造」和「引错条目」——这两件事严重性完全不同
+    everything = "\n".join(texts.values())
     for kind, block in schema_v2.iter_blocks(draft):
         cited = "\n".join(texts.get(c, "") for c in (block.get("cites") or []))
         if not cited:
             continue  # 无引用由引用覆盖门禁负责，这里不重复报
-        cited = schema_v2.normalize_numbers(cited)
-        for num in schema_v2.NUMBER_RE.findall(block.get("text") or ""):
-            if num not in cited:
+        for num in schema_v2.numbers_to_check(block.get("text") or ""):
+            if num in cited:
+                continue
+            if num in everything:
+                # 数字是真的，只是引错了条目。属于引用质量问题，不是事实错误。
+                issues.append((
+                    "数字与引用不符",
+                    "%s 中的「%s」在别的证据里能找到，但不在它所引的证据里" % (kind, num),
+                ))
+            else:
                 issues.append((
                     "数字无出处",
-                    "%s 中的「%s」在所引证据里找不到" % (kind, num),
+                    "%s 中的「%s」在所有证据里都找不到" % (kind, num),
                 ))
     return issues
 

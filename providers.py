@@ -87,6 +87,17 @@ def validate_against(data, schema):
     return errs
 
 
+def prompt_fingerprint():
+    """V2 提示词正文的短指纹，用作默认 prompt_version。
+
+    放进 input_hash 后，任何提示词改动都会自动让缓存失效——不需要人记得改版本号。
+    """
+    from prompts import V2_PROMPTS
+    blob = "".join(V2_PROMPTS[k]["system"] + V2_PROMPTS[k]["user"]
+                   for k in sorted(V2_PROMPTS))
+    return "v2fp-" + hashlib.sha256(blob.encode("utf-8")).hexdigest()[:10]
+
+
 class TextModelProvider:
     """文本模型基类：重试 + 解析 + 校验 + 幂等缓存 + 审计。"""
 
@@ -180,10 +191,12 @@ class DeepSeekProvider(TextModelProvider):
     name = "deepseek"
     model = "deepseek-chat"
 
-    def __init__(self, api_key, prompt_version="1.0", timeout=60, **kw):
+    def __init__(self, api_key, prompt_version=None, timeout=60, **kw):
         super().__init__(**kw)
         self.api_key = api_key
-        self.prompt_version = prompt_version
+        # 不给版本号就用提示词正文的指纹。改了提示词必然换缓存键——
+        # 靠人记得手动 bump 版本号是靠不住的，漏一次就会静默复用旧 prompt 的结果。
+        self.prompt_version = prompt_version or prompt_fingerprint()
         self.timeout = timeout
 
     def build_messages(self, task, inputs):

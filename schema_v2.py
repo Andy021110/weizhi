@@ -195,11 +195,27 @@ _MONTH_RE = re.compile(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec
 
 
 def normalize_numbers(text):
-    """归一化数字表达，让中英混排材料的数字可以互相对齐。"""
+    """归一化数字表达，让中英混排材料的数字可以互相对齐。
+
+    两处归一化：英文月份名 → 数字（September → 9）、千分位逗号去掉
+    （8,192 → 8192）。少任何一处，模型写对了也会被判成编造。
+    """
     if not text:
         return ""
 
     def repl(m):
         return _MONTHS.get(m.group(1)[:3].lower(), m.group(0))
 
-    return _MONTH_RE.sub(repl, text)
+    text = _MONTH_RE.sub(repl, text)
+    return re.sub(r"(?<=\d),(?=\d{3}(?!\d))", "", text)
+
+
+# 型号名/许可证名里的数字：「PatchTST-FM-r2」「Apache-2.0」「OpenMDW-1.0」。
+# 它们是专有名词的一部分，不是可核验事实，当数字查会大量误报。
+# 要求开头至少 2 个字母，避免把「v3.1.4」这类真版本号也一并放过。
+_IDENTIFIER = re.compile(r"[A-Za-z]{2,}[A-Za-z0-9]*(?:[-_.][A-Za-z0-9]+)+")
+
+
+def numbers_to_check(text):
+    """抽取需要核验的数字，跳过专有名词里的数字。"""
+    return NUMBER_RE.findall(_IDENTIFIER.sub(" ", text or ""))
