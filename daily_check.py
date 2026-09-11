@@ -200,13 +200,18 @@ def pick_candidates(limit=20, check_all=False):
     """候选选择：最新 48h 卡优先；不足 20 张时按 id 游标轮转补足（存 user_state.qc_cursor）。
     周日或 --check-all 时全量检查。"""
     today = datetime.now()
+    # 影子卡不参与质检与自动修复：评审阶段要看的就是 v2 的原始产出，
+    # 让 v1 的修复流水线去改它，等于把要评估的东西先改了一遍。
+    def _keep(cards):
+        return [c for c in cards if not db.is_shadow_card(c)]
+
     if check_all or today.weekday() == 6:
-        return db.load_cards(None)
-    fresh = db.load_cards_since((datetime.now() - timedelta(hours=48)).isoformat())
+        return _keep(db.load_cards(None))
+    fresh = _keep(db.load_cards_since((datetime.now() - timedelta(hours=48)).isoformat()))
     if len(fresh) >= limit:
         return fresh[:limit]
 
-    all_cards = sorted(db.load_cards(None), key=lambda c: c.get("id") or 0)
+    all_cards = sorted(_keep(db.load_cards(None)), key=lambda c: c.get("id") or 0)
     if not all_cards:
         return fresh
     try:

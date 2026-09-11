@@ -277,6 +277,19 @@ def _load(v):
         return v
 
 
+def is_shadow_card(card):
+    """影子卡：由 v2 生成、仅供人工评审，不参与荐读、自动修复与质检评分。
+
+    判据只在这个函数里实现一次。散在各处写 `_meta.get("shadow")` 的话，
+    迟早有一处漏掉，而漏掉的后果是影子卡悄悄进了用户的推送——
+    正是影子模式要避免的事。
+    """
+    if not isinstance(card, dict):
+        return False
+    return bool((card.get("_bridge") or {}).get("shadow")
+                or (card.get("_meta") or {}).get("shadow"))
+
+
 def save_card(card, date=None):
     """插入卡片，source_url 冲突则忽略（去重）。返回是否插入成功。
 

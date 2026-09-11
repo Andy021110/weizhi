@@ -209,6 +209,9 @@ def today_picks():
     cards = db.load_cards(datetime.now().strftime("%Y-%m-%d"))
     out = []
     for c in cards:
+        # 影子卡（v2 评审用）可见但不进荐读，避免挤掉用户在学的正片
+        if db.is_shadow_card(c):
+            continue
         out.append({
             "source_url": c.get("source_url"),
             "title": c.get("title") or "",

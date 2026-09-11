@@ -83,7 +83,7 @@ def split_items(items):
 
 
 def to_v1_card(draft, items, material=None, supplement=None, figures=None,
-               pack_id=None, draft_id=None, date=None):
+               pack_id=None, draft_id=None, date=None, shadow=False):
     """把 v2 产出映射成 v1 卡片字典。
 
     `supplement` 缺省时 think_answer / open_question 为空——调用方应先跑
@@ -130,9 +130,13 @@ def to_v1_card(draft, items, material=None, supplement=None, figures=None,
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             # 标注来源：出问题时能追回是 v2 哪一次生成
             "origin": "v2-bridge",
+            "shadow": bool(shadow),
         },
         "_bridge": {
             "origin": "v2",
+            # 影子卡：可见但不推送、不进自动修复。评审阶段用它把
+            # v2 的原始产出和 v1 的处理流水线隔开。
+            "shadow": bool(shadow),
             "draft_id": draft_id,
             "pack_id": pack_id,
             "objective": draft.get("objective"),
@@ -202,7 +206,7 @@ def supplement(provider, draft):
 
 
 def from_draft(draft_id, items=None, material=None, provider=None, pack_id=None,
-               figures=None, date=None):
+               figures=None, date=None, shadow=False):
     """从库里的一张 v2 草稿桥接成 v1 卡片（含补全调用）。"""
     row = db.get_v2_card_draft_by_id(draft_id)
     if not row:
@@ -218,7 +222,7 @@ def from_draft(draft_id, items=None, material=None, provider=None, pack_id=None,
 
     sup = supplement(provider, draft) if provider else {}
     card = to_v1_card(draft, items, material, sup, figures,
-                      pack_id=pack_id, draft_id=draft_id, date=date)
+                      pack_id=pack_id, draft_id=draft_id, date=date, shadow=shadow)
     if provider:
         card["_bridge"]["milestone"] = row.get("concept")
         card["_bridge"]["capability_gap"] = row.get("capability_gap")
