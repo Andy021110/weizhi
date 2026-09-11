@@ -82,6 +82,57 @@ def split_items(items):
     return immediate, later
 
 
+# 不允许出现在卡片 SVG 里的构造。图是我们自己渲染的、文本已经过 _esc 转义，
+# 这里是纵深防御：万一以后换了渲染实现或模型能影响属性，也能拦住整类问题。
+_SVG_FORBIDDEN = ("<script", "<foreignobject", "onload=", "onerror=", "javascript:", "<iframe")
+
+
+def _safe_svg(svg):
+    """检查渲染出来的 SVG 能不能安全地交给前端 innerHTML。"""
+    low = (svg or "").lower()
+    for bad in _SVG_FORBIDDEN:
+        if bad in low:
+            return None
+    return svg
+
+
+def figures_for_card(figures, width=None):
+    """把 v2 的图形方案渲染成可直接注入前端的条目。
+
+    返回 (items, notes)：
+    - items：`{kind, caption, alt, reading, proposition, svg}`，只含渲染成功的图
+    - notes：被跳过的图及原因，**不静默丢弃**
+
+    为什么要单独一个函数而不是内联在 to_v1_card 里：单元测试要能单独
+    验证「图渲染失败时卡片照样成立」这条路径。
+    """
+    import visual
+    items, notes = [], []
+    for i, fig in enumerate(figures or []):
+        kind = (fig or {}).get("kind")
+        if not kind or kind in ("none", visual.SCENE_KIND):
+            notes.append({"kind": kind or "none", "why": "需要图片服务，跳过确定性渲染"})
+            continue
+        try:
+            svg = visual.render(fig, width or visual.CANVAS_WIDTH)
+        except (ValueError, TypeError, KeyError) as exc:
+            notes.append({"kind": kind, "why": "渲染失败：%s" % exc})
+            continue
+        safe = _safe_svg(svg)
+        if not safe:
+            notes.append({"kind": kind, "why": "渲染结果含不允许的构造，已丢弃"})
+            continue
+        items.append({
+            "kind": kind,
+            "caption": fig.get("caption") or "",
+            "alt": fig.get("alt") or "",
+            "reading": fig.get("reading") or "",
+            "proposition": fig.get("proposition") or "",
+            "svg": safe,
+        })
+    return items, notes
+
+
 def to_v1_card(draft, items, material=None, supplement=None, figures=None,
                pack_id=None, draft_id=None, date=None, shadow=False):
     """把 v2 产出映射成 v1 卡片字典。
@@ -91,6 +142,7 @@ def to_v1_card(draft, items, material=None, supplement=None, figures=None,
     """
     material = material or {}
     supplement = supplement or {}
+    figure_items, figure_notes = figures_for_card(figures)
 
     # 正文 = 解释 + 例子 + 边界。边界单独成段并加小标题，
     # 因为读者需要一眼看出「这段在讲适用范围」，混在解释里会被略过。
@@ -124,6 +176,10 @@ def to_v1_card(draft, items, material=None, supplement=None, figures=None,
                                        "专业博客"),
         "published": material.get("published_at"),
         "generated_at": datetime.now().isoformat(timespec="seconds"),
+        # 配图以渲染好的 SVG 随卡片落库（存进 extra JSON）。
+        # 前端拿到就能直接注入，不需要在浏览器里重实现一遍布局算法——
+        # 布局的可信来源只有 visual.py 一处。
+        "figures": figure_items,
         "_meta": {
             "template": TEMPLATE,
             "category": "AI",
@@ -142,7 +198,8 @@ def to_v1_card(draft, items, material=None, supplement=None, figures=None,
             "objective": draft.get("objective"),
             "milestone": None,
             "layers": sorted({it.get("layer") for it in (items or []) if it.get("layer")}),
-            "figures": len(figures or []),
+            "figures": len(figure_items),
+            "figure_notes": figure_notes,
             "bridged_at": datetime.now().isoformat(timespec="seconds"),
         },
     }
@@ -156,6 +213,16 @@ def dedupe_key(card):
     可能合法地出多张卡（范围决策已废除「一文一卡」），所以这里带上前缀。"""
     raw = "%s|%s" % (card.get("source_url") or "", card.get("title") or "")
     return "v2:" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
+
+
+def stored_key(url, title):
+    """这张卡入库后实际使用的 source_url。
+
+    单独抽出来是因为**刷新已入库的卡**也要算出同一个键——它必须与
+    `save` 用的算法完全一致，否则刷新会找不到行、又静默什么都不做。
+    """
+    raw = "%s|%s" % (url or "", title or "")
+    return "%s#v2:%s" % (url, hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12])
 
 
 def check_v1_compat(card):
@@ -233,8 +300,49 @@ def save(card, date=None):
     """落 v1 的 cards 表。返回是否写入（同一来源+标题已存在则忽略）。"""
     if card.get("source_url"):
         card = dict(card)
-        card["source_url"] = "%s#%s" % (card["source_url"], dedupe_key(card))
+        card["source_url"] = stored_key(card["source_url"], card.get("title"))
     return db.save_card(card, date=date)
+
+
+def refresh(limit=200, dry_run=False):
+    """按当前桥接规则刷新**已入库**的 v2 卡。
+
+    为什么需要它：桥接规则一改（比如这次加入配图渲染），之前入库的卡还是
+    旧样子。部署完跑一轮发现「什么变化都没有」，很容易被误判成改动没生效，
+    然后去改本来没错的代码。
+
+    这里**只重算派生字段**（配图 / 溯源笔记），不重跑模型、不动正文与题目：
+    正文是模型产出的既有事实，刷新不该顺手把它改掉。
+
+    返回 {"checked", "updated", "missing", "skipped"}。
+    """
+    rows = db.list_v2_card_drafts(limit=limit)
+    updated, missing, skipped = [], [], []
+    for r in rows:
+        payload = r.get("payload") or {}
+        url = None
+        if r.get("source_id"):
+            src = db.get_v2_source_by_id(r["source_id"]) or {}
+            url = src.get("url")
+        if not url or not payload.get("title"):
+            skipped.append({"draft_id": r["id"], "why": "缺少来源 URL 或标题，无法定位卡片"})
+            continue
+
+        items, notes = figures_for_card(r.get("figures") or [])
+        key = stored_key(url, payload["title"])
+        patch = {
+            "figures": items,
+            "_bridge": {"figures": len(items), "figure_notes": notes},
+        }
+        if dry_run:
+            updated.append({"draft_id": r["id"], "figures": len(items)})
+            continue
+        if db.merge_card_extra(key, patch):
+            updated.append({"draft_id": r["id"], "figures": len(items)})
+        else:
+            missing.append({"draft_id": r["id"], "why": "库里没有对应的卡片"})
+    return {"checked": len(rows), "updated": updated,
+            "missing": missing, "skipped": skipped}
 
 
 def publish_gate(card):

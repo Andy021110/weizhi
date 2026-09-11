@@ -233,8 +233,9 @@ def fix_vocab_terms(card):
     return card
 
 
-def create_card(api_key, topic=None, url=None, template="t2_reading"):
-    """在阅读器内新建知识卡。template 支持 t1_vocab/t2_reading/t3_math/t4_trivia/t5_skill。"""
+def create_card(api_key, topic=None, url=None, template="t2_reading", source_url_override=None):
+    """在阅读器内新建知识卡。template 支持 t1_vocab/t2_reading/t3_math/t4_trivia/t5_skill。
+    source_url_override：从「阅读来的概念」生成卡时，用 ledger:{norm_id} 关联台账。"""
     if not api_key:
         return {"error": "未配置 API key"}
 
@@ -285,7 +286,9 @@ def create_card(api_key, topic=None, url=None, template="t2_reading"):
         return {"error": card.get("reason", "AI 判定该内容无法生成卡片")}
 
     # topic 模式下模板产出的 source_url 为空，需补唯一 key 才能正常入库去重
-    if not card.get("source_url"):
+    if source_url_override:
+        card["source_url"] = source_url_override
+    elif not card.get("source_url"):
         card["source_url"] = "custom:{ts}:{title}".format(
             ts=int(time.time()), title=(title or "topic")[:40]
         )
@@ -947,6 +950,17 @@ class ReaderHandler(BaseHTTPRequestHandler):
             self._send_json({"profile": db.get_profile()})
             return
 
+        if path == "/api/ledger/mastery":
+            ids = (qs.get("ids") or [""])[0]
+            norm_ids = [x.strip() for x in ids.split(",") if x.strip()]
+            self._send_json({"mastery": db.ledger_mastery(norm_ids)})
+            return
+
+        if path == "/api/ledger/from-reading":
+            limit = int((qs.get("limit") or ["20"])[0])
+            self._send_json({"items": db.load_ledger_from_reading(limit)})
+            return
+
         self._serve_static(path)
 
     def do_POST(self):
@@ -969,6 +983,35 @@ class ReaderHandler(BaseHTTPRequestHandler):
         if path == "/api/verify":
             ok = bool(load_access_token()) and req.get("token", "") == load_access_token()
             self._send_json({"ok": ok})
+            return
+
+        if path == "/api/ledger/encounter":
+            concepts = req.get("concepts") or []
+            source = req.get("source") or {}
+            added = updated = 0
+            for c in concepts:
+                r = db.upsert_ledger_concept(c, source)
+                if r == "added":
+                    added += 1
+                elif r == "updated":
+                    updated += 1
+            self._send_json({"success": True, "added": added, "updated": updated})
+            return
+
+        if path == "/api/ledger/make-card":
+            # 从「阅读来的概念」生成 T1 词汇卡，source_url 用 ledger:{norm_id} 关联台账
+            norm_id = (req.get("norm_id") or "").strip()
+            term = (req.get("term") or "").strip()
+            if not norm_id or not term:
+                self._send_json({"error": "缺少 norm_id 或 term"})
+                return
+            result = create_card(
+                load_api_key(),
+                topic=term,
+                template="t1_vocab",
+                source_url_override="ledger:" + norm_id,
+            )
+            self._send_json(result)
             return
 
         if path == "/api/grade":

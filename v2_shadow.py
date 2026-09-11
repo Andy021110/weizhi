@@ -195,7 +195,20 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="微知 v2 影子生产（不进用户推送）")
     ap.add_argument("--limit", type=int, default=1, help="一轮最多产出几张")
     ap.add_argument("--dry-run", action="store_true", help="只走链路不落库")
+    ap.add_argument("--refresh", action="store_true",
+                    help="不生成新卡，只按当前桥接规则刷新已入库的 v2 卡"
+                         "（配图等派生字段）。桥接规则改动后用，不耗费模型调用。")
     args = ap.parse_args(argv)
+
+    if args.refresh:
+        import bridge_v1
+        result = bridge_v1.refresh(limit=max(args.limit, 200), dry_run=args.dry_run)
+        log("刷新完成：检查 %d 条，更新 %d 条，未命中 %d 条，跳过 %d 条"
+            % (result["checked"], len(result["updated"]),
+               len(result["missing"]), len(result["skipped"])))
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+
     result = run(limit=args.limit, dry_run=args.dry_run)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result.get("ok") else 1

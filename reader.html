@@ -246,6 +246,24 @@
   .body-text p:last-child { margin-bottom: 0; }
   .body-text .body-heading { font-weight: 700; font-size: 15.5px; color: var(--text); margin-top: 4px; }
 
+  /* v2 配图：SVG 由服务端 visual.py 确定性渲染，前端只负责注入与排版。
+     布局算法不在浏览器里重实现一份——两份实现必然漂移。 */
+  .fig-block { margin: 0 0 14px; }
+  .fig-block:last-child { margin-bottom: 0; }
+  .fig-canvas {
+    background: #fff; border: 1px solid #ece9e2; border-radius: var(--radius-sm);
+    padding: 8px 6px; overflow: hidden;
+  }
+  .fig-canvas svg { display: block; width: 100%; height: auto; }
+  .fig-caption {
+    font-size: 12.5px; color: var(--text-3); line-height: 1.6;
+    margin-top: 7px; text-align: center;
+  }
+  .fig-reading {
+    font-size: 13px; color: var(--text-2); line-height: 1.7; margin-top: 7px;
+    border-left: 3px solid var(--primary); padding-left: 9px;
+  }
+
   .core-point { display: flex; gap: 10px; margin-bottom: 12px; }
   .core-point:last-child { margin-bottom: 0; }
   .core-num {
@@ -577,6 +595,7 @@
       <div class="entry-row">
         <button class="entry-btn" id="favBtn">收藏</button>
         <button class="entry-btn" id="statsBtn">统计</button>
+        <button class="entry-btn" id="ledgerBtn">阅读待学</button>
       </div>
       <div class="plan-section" id="planSection" style="display:none"></div>
       <div class="count-line" id="countLine"></div>
@@ -627,6 +646,16 @@
       <div id="notifList"></div>
       <button class="create-cancel" id="notifReadAll" style="margin-top:12px">全部标为已读</button>
       <button class="create-cancel" id="notifClose" style="margin-top:6px">关闭</button>
+    </div>
+  </div>
+
+  <!-- 阅读待学弹层（从阅读来的概念） -->
+  <div class="create-overlay" id="ledgerOverlay" style="display:none">
+    <div class="create-box" style="max-width:520px;max-height:82vh;overflow-y:auto">
+      <div class="create-box-title">阅读待学</div>
+      <div class="create-hint" id="ledgerHint"></div>
+      <div id="ledgerList"></div>
+      <button class="create-cancel" id="ledgerClose" style="margin-top:12px">关闭</button>
     </div>
   </div>
 
@@ -963,6 +992,31 @@
     }).join('');
   }
 
+  // v2 配图：svg 由服务端渲染好随卡片下发，这里只注入。
+  // 两道检查缺一不可——前端不能假设后端永远正确：
+  // 1) svg 必须是以 <svg 开头的字符串（挡住了普通文本被当标签注入）；
+  // 2) 不含 script / on* 事件。服务端已做过一次，这里是纵深防御。
+  function renderFigures(figs) {
+    if (!figs || !figs.length) return '';
+    var blocks = figs.filter(function (f) {
+      if (!f || typeof f.svg !== 'string') return false;
+      var s = f.svg.trim();
+      if (!/^<svg[\s>]/i.test(s)) return false;
+      return !/<script|<iframe|onload=|onerror=|javascript:/i.test(s);
+    }).map(function (f) {
+      var label = f.alt || f.caption || '配图';
+      var html = '<figure class="fig-block">' +
+        '<div class="fig-canvas" role="img" aria-label="' + escapeHtml(label) + '">' +
+        f.svg + '</div>';
+      if (f.caption) html += '<figcaption class="fig-caption">' + escapeHtml(f.caption) + '</figcaption>';
+      // 读图结论是这张图存在的理由：没有它，图就只是装饰
+      if (f.reading) html += '<div class="fig-reading">' + escapeHtml(f.reading) + '</div>';
+      return html + '</figure>';
+    }).join('');
+    if (!blocks) return '';
+    return '<div class="section"><div class="section-title">看图理解</div>' + blocks + '</div>';
+  }
+
   // 按模板类型渲染卡片正文内容
   function renderCardContent(c) {
     var tpl = (c._meta && c._meta.template) || 't2_reading';
@@ -1027,6 +1081,7 @@
       if (c.pitfalls) html += '<div class="section"><div class="section-title">常见坑</div><div class="think-box">' + escapeHtml(c.pitfalls) + '</div></div>';
     } else {
       html += '<div class="section"><div class="section-title">正文精读</div><div class="body-text">' + renderBody(c.body) + '</div></div>';
+      html += renderFigures(c.figures);
       var points = c.core_points || [];
       if (points.length) {
         html += '<div class="section"><div class="section-title">核心观点</div>';
@@ -2317,6 +2372,65 @@
     }).catch(function () {});
   }
 
+  // ---------- 阅读待学（从阅读来的概念）----------
+  function showLedger() {
+    $('ledgerOverlay').style.display = 'flex';
+    loadLedger();
+  }
+  function loadLedger() {
+    fetchJSON('/api/ledger/from-reading?limit=30').then(function (d) {
+      var items = d.items || [];
+      $('ledgerHint').textContent = items.length
+        ? '这些概念你在阅读里反复遇到，但还没学成卡片'
+        : '还没有攒够概念（同一概念遇到 2 次以上才会出现在这里）';
+      if (!items.length) {
+        $('ledgerList').innerHTML = '<div style="padding:20px 0;color:var(--text-3);font-size:13px;text-align:center">去浏览器插件里读几篇英文文章<br>概念就会自动汇到这里</div>';
+        return;
+      }
+      $('ledgerList').innerHTML = items.map(function (it) {
+        return '<div style="display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid var(--line)">' +
+          '<div style="flex:1;min-width:0">' +
+            '<div style="font-weight:700;font-size:14px">' + escapeHtml(it.term) + '</div>' +
+            (it.one_line ? '<div style="font-size:12px;color:var(--text-2);margin-top:2px">' + escapeHtml(it.one_line) + '</div>' : '') +
+            (it.why_matters ? '<div style="font-size:11px;color:var(--accent);margin-top:2px">' + escapeHtml(it.why_matters) + '</div>' : '') +
+            '<div style="font-size:11px;color:var(--text-3);margin-top:2px">遇到 ' + it.count + ' 次</div>' +
+          '</div>' +
+          '<button class="ledger-make-btn" data-id="' + escapeHtml(it.norm_id) + '" data-term="' + escapeHtml(it.term) + '" style="flex-shrink:0;border:none;background:var(--accent);color:#fff;font-size:12px;font-weight:600;padding:8px 12px;border-radius:8px;cursor:pointer">生成词汇卡</button>' +
+        '</div>';
+      }).join('');
+      bindLedgerMake();
+    }).catch(function () {
+      $('ledgerList').innerHTML = '<div style="color:var(--text-3);padding:16px 0">加载失败</div>';
+    });
+  }
+  function bindLedgerMake() {
+    document.querySelectorAll('.ledger-make-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = btn.dataset.id, term = btn.dataset.term;
+        btn.disabled = true;
+        btn.textContent = '生成中…';
+        fetch('/api/ledger/make-card', {
+          method: 'POST',
+          headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+          body: JSON.stringify({ norm_id: id, term: term })
+        }).then(function (r) { return r.json(); }).then(function (res) {
+          if (res.success) {
+            btn.textContent = '已生成 ✓';
+            btn.style.background = 'var(--primary)';
+            setTimeout(loadLedger, 600);
+          } else {
+            btn.textContent = '重试';
+            btn.disabled = false;
+            alert('生成失败：' + (res.error || '未知错误'));
+          }
+        }).catch(function () {
+          btn.textContent = '重试';
+          btn.disabled = false;
+        });
+      });
+    });
+  }
+
   // ---------- 学习仪表盘（统计页升级版）----------
   function dashBar(label, value, max, color) {
     var pct = max ? Math.max(4, Math.round(value / max * 100)) : 0;
@@ -2765,6 +2879,8 @@
   });
   $('favBtn').addEventListener('click', showFavorites);
   $('statsBtn').addEventListener('click', showStats);
+  $('ledgerBtn').addEventListener('click', showLedger);
+  $('ledgerClose').addEventListener('click', function () { $('ledgerOverlay').style.display = 'none'; });
   $('qcBtn').addEventListener('click', openQcReport);
   $('qcClose').addEventListener('click', function () { $('qcOverlay').style.display = 'none'; });
   $('qcOverlay').addEventListener('click', function (e) {

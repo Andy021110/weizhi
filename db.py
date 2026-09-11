@@ -900,7 +900,11 @@ def get_card(source_url):
 
 
 def update_card_extra(source_url, key, value):
-    """更新卡片 extra JSON 中的某个字段（value=None 表示删除该字段）。返回是否成功。"""
+    """更新卡片 extra JSON 中的某个字段（value=None 表示删除该字段）。返回是否成功。
+
+    单字段版本，v1 的 reader.py 用它打「重新生成」标记。
+    需要一次改多个字段（含嵌套合并）时用下面的 `merge_card_extra`。
+    """
     if not source_url:
         return False
     conn = _conn()
@@ -917,6 +921,43 @@ def update_card_extra(source_url, key, value):
             "UPDATE cards SET extra = ? WHERE source_url = ?",
             (_dump(extra) if extra else None, source_url),
         )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def merge_card_extra(source_url, patch):
+    """批量合并 extra 字段，返回是否命中。dict 值做一层深合并。
+
+    与 `update_card_extra` 的分工：那个是「改一个键」，这个是「一次改一批，
+    且不许把调用方没提到的键抹掉」。分离成两个函数而不是把前者改成万能签名，
+    是因为前者已被 v1 的 reader.py 调用——动它的签名等于动生产代码。
+
+    用途：桥接规则变化后，把**已入库**的卡补齐新字段（比如配图）。
+    没有它，改了桥接规则只有新卡会变，旧卡永远是旧样子——
+    很容易被误当成「改动没生效」，然后去改本来没错的代码。
+    """
+    if not source_url or not isinstance(patch, dict):
+        return False
+    conn = _conn()
+    try:
+        row = conn.execute(
+            "SELECT id, extra FROM cards WHERE source_url = ?", (source_url,)
+        ).fetchone()
+        if not row:
+            return False
+        extra = _load(row["extra"])
+        if not isinstance(extra, dict):
+            extra = {}
+        for k, v in patch.items():
+            if isinstance(v, dict) and isinstance(extra.get(k), dict):
+                merged = dict(extra[k])
+                merged.update(v)
+                extra[k] = merged
+            else:
+                extra[k] = v
+        conn.execute("UPDATE cards SET extra = ? WHERE id = ?", (_dump(extra), row["id"]))
         conn.commit()
         return True
     finally:
