@@ -175,6 +175,7 @@ CREATE TABLE IF NOT EXISTS v2_card_drafts (
   objective TEXT,
   concept TEXT,             -- 映射到的里程碑 id（方案 M2：每张卡都要能映射）
   capability_gap TEXT,      -- 这张卡补的是哪个能力缺口（可解释性）
+  figures TEXT,             -- JSON：配图方案（含要解释的命题/图形语法/alt/图注/读图结论）
   status TEXT,              -- draft / published / rejected
   payload TEXT,             -- JSON 字符串
   gate_report TEXT,         -- JSON 字符串，质量门禁结果
@@ -229,6 +230,7 @@ def _migrate():
         for col, ddl in (
             ("concept", "ALTER TABLE v2_card_drafts ADD COLUMN concept TEXT"),
             ("capability_gap", "ALTER TABLE v2_card_drafts ADD COLUMN capability_gap TEXT"),
+            ("figures", "ALTER TABLE v2_card_drafts ADD COLUMN figures TEXT"),
         ):
             if dcols and col not in dcols:
                 conn.execute(ddl)
@@ -1530,6 +1532,7 @@ def get_v2_card_draft(input_hash):
     d = dict(row)
     d["payload"] = _load(d.get("payload"))
     d["gate_report"] = _load(d.get("gate_report"))
+    d["figures"] = _load(d.get("figures"))
     return d
 
 
@@ -1545,6 +1548,7 @@ def get_v2_card_draft_by_id(draft_id):
     d = dict(row)
     d["payload"] = _load(d.get("payload"))
     d["gate_report"] = _load(d.get("gate_report"))
+    d["figures"] = _load(d.get("figures"))
     return d
 
 
@@ -1567,6 +1571,7 @@ def list_v2_card_drafts(status=None, limit=50):
         d = dict(r)
         d["payload"] = _load(d.get("payload"))
         d["gate_report"] = _load(d.get("gate_report"))
+        d["figures"] = _load(d.get("figures"))
         out.append(d)
     return out
 
@@ -1780,3 +1785,22 @@ def list_v2_reviews(goal_key=None, concept=None, limit=100):
     finally:
         conn.close()
     return [dict(r) for r in rows]
+
+
+def save_v2_draft_figures(draft_id, figures):
+    """把配图方案挂到草稿上。图形是草稿的附属产物，不单独建表——
+    它离开这张卡就没有意义。"""
+    conn = _conn()
+    try:
+        conn.execute(
+            "UPDATE v2_card_drafts SET figures=?, updated_at=? WHERE id=?",
+            (_dump(figures), datetime.now().isoformat(timespec="seconds"), draft_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_v2_draft_figures(draft_id):
+    row = get_v2_card_draft_by_id(draft_id)
+    return (row or {}).get("figures")
