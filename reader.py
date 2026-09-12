@@ -120,10 +120,11 @@ CARD_DETAIL_KEYS = (
     "source_url", "title", "template", "summary", "body", "difficulty",
     "timeliness", "credibility", "published", "author", "source",
     "think_question", "think_answer", "core_points", "_meta",
-    # 以下四项缺了都不会报错，只会「界面少一块」：
+    # 以下五项缺了都不会报错，只会「界面少一块」：
     # figures → 配图在列表里点开就消失；favorite → 收藏按钮状态错；
-    # _date → 顶部日期徽标空白；category → 分类徽标变成兜底文字。
-    "figures", "favorite", "_date", "category",
+    # _date → 顶部日期徽标空白；category → 分类徽标变成兜底文字；
+    # reading_minutes → 详情页少了「约 N 分钟」。
+    "figures", "favorite", "_date", "category", "reading_minutes",
 )
 
 
@@ -293,6 +294,11 @@ def build_dashboard():
             })
     return {
         "stats": db.stats(),
+        # 掌握度构成 + 知识地图：这两项是「学习者视角」的图，和下面的
+        # 内容块分布（维护者视角）不同——它们回答的是「我会什么」，
+        # 而不是「我的卡里有什么」。
+        "mastery_dist": db.mastery_dist(),
+        "knowledge_map": db.knowledge_map(),
         # 内容块分布取代模板分布（类型已从界面下线）
         "block_dist": db.block_dist(),
         "quality": {

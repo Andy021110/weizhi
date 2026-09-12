@@ -531,6 +531,13 @@
   .stat-cell-num { font-size: 24px; font-weight: 800; color: var(--primary); }
   .stat-cell-label { font-size: 12px; color: var(--text-3); margin-top: 4px; }
 
+  /* 阅读时长 + 空状态（支撑第一屏「今天读什么」） */
+  .meta-time { font-size: 11px; color: var(--text-3); }
+  .empty-box { background: var(--card); border: 1px dashed var(--line); border-radius: var(--radius-sm); padding: 16px 14px; }
+  .empty-title { font-size: 14px; font-weight: 700; color: var(--text-1); margin-bottom: 6px; }
+  .empty-why { font-size: 12.5px; color: var(--text-2); line-height: 1.75; margin-bottom: 8px; }
+  .empty-do { font-size: 12px; color: var(--text-3); line-height: 1.7; }
+
   /* 模板选择 + 冷启动引导 */
   .template-row { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
   .tpl-btn { border: 1px solid var(--line); background: var(--card); color: var(--text-2); font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 999px; cursor: pointer; }
@@ -602,10 +609,17 @@
       <!-- 「连击天数」已下线（范围决策）：用连续天数施压会把学习变成打卡，
            而且断一天就归零，衡量不出学进去多少。改成累计学习天数——
            不施压、不归零，也不作为质量判断依据。 -->
-      <span class="stat-item">今日 <b id="todayDone">0</b> 张 · 累计学习 <b id="studyDays">0</b> 天</span>
+      <!-- 原来这里是「今日 0 张 · 累计学习 9 天」。问题在于第一屏最显眼的位置
+           回答的是「你今天做了多少」，而用户打开时想问的是「今天读什么」——
+           「今日 0 张」成了一个每次打开都要看的负反馈，且与下方列表里的
+           「今天有几张卡」不同义（一个是完成数，一个是内容数）。
+           完成数降级到列表上方（见 renderList 的 countLine）。 -->
+      <span class="stat-item">累计学习 <b id="studyDays">0</b> 天 · 已学 <b id="doneTotal">0</b> 张</span>
       <button class="review-btn tint" id="notifBtn" style="display:none"><span class="ic-svg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 9a6 6 0 1 0-12 0c0 4.5-2 5.8-2 5.8h16s-2-1.3-2-5.8z"/><path d="M10 19a2.2 2.2 0 0 0 4 0"/></svg></span> <b id="notifCount">0</b></button>
-      <button class="review-btn tint-green" id="qcBtn"><span class="ic-svg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 2.8V11c0 4.6-3.1 7.6-7 9-3.9-1.4-7-4.4-7-9V5.8L12 3z"/><path d="M9 12l2.2 2.2L15.5 9.5"/></svg></span> 质检</button>
-      <button class="review-btn danger" id="reviewBtn" style="display:none">待复习 <b id="reviewCount">0</b></button>
+      <!-- 「质检」移到了统计页里：它是维护者动作（看质量报告 / badcase），
+           日常使用不需要，却占了顶栏和「今天复习」同等的位置；
+           而且「质检」两个字会让用户以为是自己需要检查什么。 -->
+      <button class="review-btn tint" id="reviewBtn" style="display:none">今天复习 <b id="reviewCount">0</b> 条</button>
     </div>
     <div class="search-box" style="position:relative">
       <input type="text" id="searchInput" placeholder="搜索卡片（标题 / 正文）..." style="padding-right:34px">
@@ -864,6 +878,9 @@
   var ws = loadWeizhiState();
   if (!ws.completed || typeof ws.completed !== 'object') ws.completed = {};
   var serverDone = null; // 服务器 progress 表（今日完成数以此为准确）
+  var userState = null;  // 服务器 user_state。含 pipeline_report——今天产线出了什么、
+                         // 哪些材料没达标。严格出卡之后「今天一张都没有」会变成
+                         // 常态而非故障，界面上必须能解释原因。
 
   function todayStr() {
     var d = new Date();
@@ -904,27 +921,21 @@
   }
 
   function renderStats() {
-    var today = todayStr();
-    // 今日完成以服务器 progress 表为准（serverDone），避免 localStorage 累积漂移
-    var doneToday = 0;
-    if (serverDone && serverDone[today]) {
-      doneToday = serverDone[today].length;
-    } else if (ws.completed && ws.completed[today]) {
-      doneToday = ws.completed[today].length;
-    }
-    $('todayDone').textContent = doneToday;
-    // 累计学习天数 = 有学习记录的天数（不是连续天数）
-    var days = 0;
-    if (serverDone) {
-      for (var d in serverDone) {
-        if (serverDone[d] && serverDone[d].length) days++;
-      }
-    } else if (ws.completed) {
-      for (var d2 in ws.completed) {
-        if (ws.completed[d2] && ws.completed[d2].length) days++;
+    // 累计学习天数 = 有学习记录的天数（不是连续天数）；
+    // 已学张数 = 跨日期去重后的卡片数。
+    // 两项都是只增不减的正向数字——第一屏不再放「今日 0 张」这类负反馈：
+    // 那是每次打开都要看一遍的自我责备，而且它与列表上方的「今天有几张卡」
+    // 不同义（一个是完成数，一个是内容数），并存时会让人以为没加载出来。
+    var src = serverDone || (ws && ws.completed) || {};
+    var days = 0, learned = {};
+    for (var d in src) {
+      if (src[d] && src[d].length) {
+        days++;
+        for (var i = 0; i < src[d].length; i++) learned[src[d][i]] = 1;
       }
     }
     $('studyDays').textContent = days;
+    $('doneTotal').textContent = Object.keys(learned).length;
   }
 
   // ---------- 服务器状态同步（localStorage 作缓存/降级，服务器为准） ----------
@@ -972,6 +983,7 @@
       }
     }
     var us = data.user_state || {};
+    userState = us;
     if (us.last_active_date) {
       ws.last_active_date = us.last_active_date;
     }
@@ -1331,22 +1343,40 @@
     for (var k = 0; k < state.cards.length; k++) {
       if (!state.cards[k].plan_id) { loose.push(state.cards[k]); looseIdx.push(k); }
     }
-    $('countLine').textContent = state.currentDate ? (fmtDate(state.currentDate) + ' · ' + loose.length + ' 张散卡') : '';
+    // 第一屏要回答的是「今天读什么」，不是「今天做了多少」。
+    // 所以这里给「还能读几张」，完成数不在这里重复出现。
+    var pending = loose.filter(function (c) { return !isDone(c); }).length;
+    if (state.currentDate === todayStr()) {
+      $('countLine').textContent = pending
+        ? '今天可以读 ' + pending + ' 张'
+        : '今天这 ' + loose.length + ' 张都读完了';
+    } else {
+      $('countLine').textContent = state.currentDate
+        ? (fmtDate(state.currentDate) + ' · ' + loose.length + ' 张') : '';
+    }
     if (!loose.length) {
-      list.innerHTML = '<div class="hint">这一天没有散卡，去上面的任务里继续学习吧</div>';
+      list.innerHTML = emptyDayHtml();
       return;
     }
     list.innerHTML = loose.map(function (c, i) {
       var cat = (c._meta && c._meta.category) || '通识';
       var diff = c.difficulty || '中级';
       var done = isDone(c);
-      var doneBadge = done ? '<span class="done-badge">✓ 已读</span>' : '';
+      // 统一叫「已学」：这一项在列表里原本叫「已读」、详情里叫「已学完」，
+      // 判断的却是同一个 isDone。两个词会让人以为是两级，于是去找
+      // 「怎么从已读升到已学完」——那个东西不存在。
+      var doneBadge = done ? '<span class="done-badge">✓ 已学</span>' : '';
+      // 碎片场景里「这张要花多久」比「讲了什么」更决定现在读还是等会儿。
+      // 正文长度只有服务端知道（列表不下发 body），见 db._reading_minutes。
+      var mins = c.reading_minutes;
+      var timeBadge = mins ? '<span class="meta-time">约 ' + mins + ' 分钟</span>' : '';
       return '<div class="card' + (done ? ' done' : '') + '" data-index="' + looseIdx[i] + '">' +
         '<div class="card-title">' + escapeHtml(c.title) + '</div>' +
         '<div class="card-summary">' + escapeHtml(c.summary) + '</div>' +
         '<div class="card-meta">' +
           '<span class="badge badge-cat">' + escapeHtml(cat) + '</span>' +
           '<span class="badge ' + difficultyClass(diff) + '">' + escapeHtml(diff) + '</span>' +
+          timeBadge +
           doneBadge +
           '<span class="meta-source">' + escapeHtml(listSource(c)) + '</span>' +
           '<span class="card-arrow">›</span>' +
@@ -1359,6 +1389,36 @@
         openDetail(parseInt(this.getAttribute('data-index'), 10));
       });
     }
+  }
+
+  // 今天产线出了什么（读 user_state.pipeline_report）。只在当天有效——
+  // 昨天的报告拿来解释今天的空白会误导。
+  function todayReport() {
+    try {
+      if (!userState || !userState.pipeline_report) return null;
+      var r = JSON.parse(userState.pipeline_report);
+      return (r && r.date === todayStr()) ? r : null;
+    } catch (e) { return null; }
+  }
+
+  // 空一天不是异常，但必须给出去处。只说「这里没有」，用户会读成「坏了」。
+  // 严格出卡（证据不足就不出）之后，某天没有新卡会变成常态而非故障——
+  // 所以这里要说清「为什么没有」，而不是让人去猜。
+  function emptyDayHtml() {
+    var rep = (state.currentDate === todayStr()) ? todayReport() : null;
+    var why = '';
+    if (rep && !rep.generated) {
+      var n = (rep.skipped || []).length;
+      why = n
+        ? '<div class="empty-why">今天抓到的 ' + n + ' 篇材料都没达到出卡标准' +
+          '（需要至少 2 条能在原文里定位到的证据）。这是有意的：' +
+          '宁可今天少一张，也不发一张没依据的。</div>'
+        : '<div class="empty-why">今天的产线还没跑（每天 6:00 和 18:00 各一次）。</div>';
+    }
+    return '<div class="empty-box">' +
+      '<div class="empty-title">这一天没有新卡</div>' + why +
+      '<div class="empty-do">可以：切到有卡的日期接着读 · 去「发现」看看为你挑的内容 · 做几条到期复习</div>' +
+    '</div>';
   }
 
   // ---------- 详情渲染 ----------
@@ -1464,9 +1524,10 @@
       '<div class="detail-title">' + escapeHtml(c.title) + '</div>' +
       '<div class="detail-summary">' + escapeHtml(c.summary) + '</div>' +
       '<div class="detail-meta">' +
-        (isDone(c) ? '<span class="badge learned-badge">✓ 已学完</span>' : '') +
+        (isDone(c) ? '<span class="badge learned-badge">✓ 已学</span>' : '') +
         '<span class="badge badge-cat">' + escapeHtml(cat) + '</span>' +
         '<span class="badge ' + difficultyClass(diff) + '">' + escapeHtml(diff) + '</span>' +
+        (c.reading_minutes ? '<span class="badge badge-time">约 ' + c.reading_minutes + ' 分钟</span>' : '') +
         planBadge +
         freshnessBadge(c) +
         '<span class="badge badge-diff-其他">' + escapeHtml(fmtDate(c._date)) + '</span>' +
@@ -1509,9 +1570,11 @@
       '</div></div>';
     }
 
-    // 「标记学完」：读完即可完成（不强制做题），已读的卡不显示
+    // 「标记已学」：读完即可（不强制做题），已学的卡不显示。
+    // 用词与列表徽标、详情徽标统一——两套说法会让人以为是两个不同级别，
+    // 于是去找「怎么从已读升到已学完」，而那个东西不存在。
     if (!isDone(c)) {
-      html += '<div class="section" style="padding:14px"><button class="quiz-toggle" id="markDoneBtn" style="background:var(--accent);box-shadow:none">✓ 标记学完</button></div>';
+      html += '<div class="section" style="padding:14px"><button class="quiz-toggle" id="markDoneBtn" style="background:var(--accent);box-shadow:none">✓ 标记已学</button></div>';
     }
 
     // 上一张/下一张导航（列表上下文）
@@ -1531,14 +1594,14 @@
     var mdBtn = $('markDoneBtn');
     if (mdBtn) mdBtn.addEventListener('click', function () {
       markComplete(c);
-      mdBtn.textContent = '✓ 已学完';
+      mdBtn.textContent = '✓ 已学';
       mdBtn.style.opacity = '.65';
       mdBtn.disabled = true;
       var meta = $('detailView').querySelector('.detail-meta');
       if (meta && !meta.querySelector('.learned-badge')) {
         var b = document.createElement('span');
         b.className = 'badge learned-badge';
-        b.textContent = '✓ 已学完';
+        b.textContent = '✓ 已学';
         meta.insertBefore(b, meta.firstChild);
       }
     });
@@ -2252,17 +2315,22 @@
     return a;
   }
 
+  // 一次复习一批，而不是把全部到期项堆在入口上。
+  // 「待复习 29」一次性摆出来，人只会关掉它——那是不可完成的量；
+  // 「今天复习 5 条」才是能做完的。剩下的仍在队列里，不会丢。
+  var REVIEW_BATCH = 5;
+
   function loadReviewQueue() {
     fetchJSON('/api/review/queue').then(function (data) {
       var reviews = data.reviews || [];
-      $('reviewCount').textContent = reviews.length;
+      $('reviewCount').textContent = Math.min(reviews.length, REVIEW_BATCH);
       $('reviewBtn').style.display = reviews.length ? 'block' : 'none';
     }).catch(function () {});
   }
 
   function startReview() {
     fetchJSON('/api/review/queue').then(function (data) {
-      reviewQueue = data.reviews || [];
+      reviewQueue = (data.reviews || []).slice(0, REVIEW_BATCH);
       reviewIndex = 0;
       reviewAgain = [];
       if (!reviewQueue.length) { loadReviewQueue(); return; }
@@ -2724,19 +2792,91 @@
       '<div style="display:flex;margin-top:2px">' + labels + '</div></div>';
   }
 
+  // 掌握度构成条：把「产出了多少」和「真正记住了多少」放在同一条上。
+  // 数字并列时看不出差距，画成一条就一眼可见——范围决策里那句
+  // 「卡片库存不作为完成结果」，这样才算落到了界面上。
+  function masteryHtml(md) {
+    if (!md || !md.total) return '';
+    var segs = [
+      { k: 'mastered', label: '已掌握', color: 'var(--primary)' },
+      { k: 'reviewing', label: '在复习', color: '#8CB89A' },
+      { k: 'fresh', label: '从未进入复习', color: '#D8D6CF' }
+    ];
+    var total = md.total;
+    var bar = segs.map(function (s) {
+      var n = md[s.k] || 0;
+      return n ? '<div style="width:' + (n / total * 100) + '%;background:' + s.color + '"></div>' : '';
+    }).join('');
+    var legend = segs.map(function (s) {
+      return '<span style="font-size:11.5px;color:var(--text-2);margin-right:14px">' +
+        '<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:' + s.color + ';margin-right:4px"></span>' +
+        escapeHtml(s.label) + ' ' + (md[s.k] || 0) + '</span>';
+    }).join('');
+    return '<div style="margin-bottom:10px">' +
+      '<div style="display:flex;height:12px;border-radius:6px;overflow:hidden;background:var(--bg)">' + bar + '</div>' +
+      '<div style="margin-top:7px">' + legend + '</div>' +
+      '<div style="margin-top:8px;font-size:11.5px;color:var(--text-3);line-height:1.6">共 ' + total + ' 张。' +
+        (md.fresh ? '未进入复习的那 ' + md.fresh + ' 张不参与任何调度，也不会被动复习到。' : '') +
+      '</div>' +
+    '</div>';
+  }
+
+  // 知识地图：主题 × 难度的「已学 / 总数」。
+  // 它和「内容块分布」的区别是——那个说你卡里有什么，这个说你会什么。
+  // 聚合之后才看得见「前沿·中级 118 张只学了 1 张」这类积压。
+  function knowledgeMapHtml(rows) {
+    if (!rows || !rows.length) return '';
+    var ORDER = ['入门', '中级', '进阶', '高级'];
+    var diffs = [], cats = [], idx = {};
+    rows.forEach(function (r) {
+      if (diffs.indexOf(r.diff) === -1) diffs.push(r.diff);
+      if (cats.indexOf(r.cat) === -1) cats.push(r.cat);
+      idx[r.cat + '|' + r.diff] = r;
+    });
+    diffs.sort(function (a, b) {
+      var ia = ORDER.indexOf(a), ib = ORDER.indexOf(b);
+      return (ia < 0 ? 9 : ia) - (ib < 0 ? 9 : ib);
+    });
+    var head = '<div style="display:flex;margin-bottom:3px"><div style="width:70px;flex-shrink:0"></div>' +
+      diffs.map(function (d) {
+        return '<div style="flex:1;text-align:center;font-size:11px;color:var(--text-3)">' + escapeHtml(d) + '</div>';
+      }).join('') + '</div>';
+    var body = cats.map(function (c) {
+      return '<div style="display:flex;align-items:center;margin-top:4px;gap:4px">' +
+        '<div style="width:70px;flex-shrink:0;font-size:11px;color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(c) + '</div>' +
+        diffs.map(function (dd) {
+          var r = idx[c + '|' + dd];
+          if (!r) return '<div style="flex:1;height:28px"></div>';
+          var rate = r.total ? r.done / r.total : 0;
+          var alpha = (0.10 + rate * 0.72).toFixed(2);
+          return '<div style="flex:1;height:28px;border-radius:4px;background:rgba(61,138,90,' + alpha + ');' +
+            'display:flex;align-items:center;justify-content:center;font-size:11px;' +
+            'color:' + (rate > 0.55 ? '#fff' : 'var(--text-2)') + '">' +
+            r.done + '/' + r.total + '</div>';
+        }).join('') +
+      '</div>';
+    }).join('');
+    return head + body;
+  }
+
   function showStats() {
     state.subView = 'stats';
     $('backBtn').style.display = 'flex';
     fetchJSON('/api/dashboard').then(function (d) {
       var s = d.stats || {}, q = d.quality || {}, pf = d.profile || {}, repairs = d.repairs || [];
       var acc = pf.accuracy != null ? Math.round(pf.accuracy * 100) + '%' : '-';
-      // 1. 知识概览
-      var html = '<div class="section"><div class="section-title">知识概览</div><div class="stat-grid">' +
-        '<div class="stat-cell"><div class="stat-cell-num">' + (s.total_cards || 0) + '</div><div class="stat-cell-label">总卡片</div></div>' +
-        '<div class="stat-cell"><div class="stat-cell-num">' + (s.total_done || 0) + '</div><div class="stat-cell-label">已学</div></div>' +
-        '<div class="stat-cell"><div class="stat-cell-num">' + (s.mastered || 0) + '</div><div class="stat-cell-label">已掌握</div></div>' +
-        '<div class="stat-cell"><div class="stat-cell-num">' + acc + '</div><div class="stat-cell-label">复习准确率</div></div>' +
-        '</div>';
+      // 1. 掌握度：用分布取代原来的四格数字。
+      //    四格答的正是「库存与掌握」，但数字并排时看不出结构——
+      //    「509 张里 460 张从没进过复习」这件事，只有画出来才看得见。
+      var html = '<div class="section"><div class="section-title">掌握度</div>' +
+        masteryHtml(d.mastery_dist) +
+        '<div style="font-size:12px;color:var(--text-3)">复习准确率 ' + acc + '</div>';
+      var km = d.knowledge_map || [];
+      if (km.length) {
+        html += '<div style="margin:14px 0 4px;font-size:12px;color:var(--text-3)">知识地图 · 已学 / 总数</div>' +
+          knowledgeMapHtml(km);
+      }
+      html += '</div>';
       // 内容块分布（取代模板分布）：类型已从界面下线，
       // "我的卡片里有多少带代码/带步骤/带例子"才是用户能拿来判断的事
       var blks = d.block_dist || [];
@@ -2787,9 +2927,17 @@
       } else {
         html += '<div style="font-size:12px;color:var(--text-3)">近 7 天无自动修复</div>';
       }
-      html += '</div>';
+      // 5. 内容质量报告入口。原来是常驻顶栏的「质检」，占着和「今天复习」
+      //    同等的位置——可它是维护动作，日常读卡用不到；而且「质检」两个字
+      //    会让人以为是自己需要检查什么。
+      html += '<div class="section" style="margin-top:14px"><div class="section-title">内容质量</div>' +
+        '<div style="font-size:12px;color:var(--text-3);line-height:1.7;margin-bottom:10px">' +
+        '巡检卡片的来源、数字与配图。这是维护动作，不影响你读卡。</div>' +
+        '<button class="task-nav-btn ghost" id="qcEntryBtn" style="width:100%">打开内容质量报告</button></div>';
       $('cardList').innerHTML = html;
       $('countLine').textContent = '仪表盘';
+      var qb = $('qcEntryBtn');
+      if (qb) qb.addEventListener('click', openQcReport);
       var rbtns = $('cardList').querySelectorAll('[data-rollback]');
       for (var i = 0; i < rbtns.length; i++) {
         rbtns[i].addEventListener('click', function () {
@@ -2825,7 +2973,10 @@
       ['复习正确率', pct(m.accuracy_today)],
       ['掌握率', pct(m.mastery_rate)],
       ['累计学习天数', m.study_days != null ? m.study_days : '-'],
-      ['待复习', m.due_today != null ? m.due_today : '-']
+      // 用「复习到期」而不是「待复习」：这是到期总数（维护视角），
+      // 与顶栏那个「今天复习 N 条」（当批可完成量）不是同一个量，
+      // 两个词混用会让人以为是同一件事。
+      ['复习到期', m.due_today != null ? m.due_today : '-']
     ];
     $('qcMetrics').innerHTML = '<div class="qc-metrics-grid">' + cells.map(function (c) {
       return '<div class="qc-metric"><div class="qc-metric-num">' + c[1] + '</div><div class="qc-metric-label">' + c[0] + '</div></div>';
@@ -3224,7 +3375,8 @@
   $('discoverClose').addEventListener('click', function () { $('discoverOverlay').style.display = 'none'; });
   $('ledgerBtn').addEventListener('click', showLedger);
   $('ledgerClose').addEventListener('click', function () { $('ledgerOverlay').style.display = 'none'; });
-  $('qcBtn').addEventListener('click', openQcReport);
+  // 「质检」已移入统计页（#qcEntryBtn），在 showStats 渲染后动态绑定——
+  // 它不再是常驻顶栏的元素，所以绑定点也跟着走。
   $('qcClose').addEventListener('click', function () { $('qcOverlay').style.display = 'none'; });
   $('qcOverlay').addEventListener('click', function (e) {
     if (e.target === $('qcOverlay')) $('qcOverlay').style.display = 'none';

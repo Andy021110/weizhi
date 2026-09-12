@@ -205,6 +205,153 @@ def generate_card(client, source, article, template):
     return card
 
 
+# ===== 证据约束成卡（主产线）=====
+#
+# 为什么改：`generate_card` 把整篇正文塞进 prompt，让模型自己找重点——
+# 生成的事实无法回溯到原文，也没法做数字一致性校验。这是「同质化且浅」的
+# 机制原因，不是模型不够好。
+#
+# `evidence.py`（确定性抽证据）+ `card_writer.py`（只喂已定位证据、每段标引用）
+# 这套链路本来就在线上，v2 影子每天在用，只是没接到占产量 99% 的主产线上。
+# 这里做的就是把两段接通——不是新建，是接线。
+#
+# 严格模式：证据不足就不出卡。宁可当天少几张，也不产出无证据的浅卡。
+
+MIN_MATERIAL_CHARS = 1000
+
+
+def build_provider(cfg):
+    """构造证据链路用的 provider。key 无效时返回 None。"""
+    key = (cfg.get("deepseek_api_key") or "").strip()
+    if not key or key.startswith("sk-你的"):
+        return None
+    from providers import DeepSeekProvider
+    return DeepSeekProvider(api_key=key, timeout=180)
+
+
+def _short(x, n=80):
+    s = x if isinstance(x, str) else json.dumps(x, ensure_ascii=False)
+    return s[:n]
+
+
+def _material_text(article):
+    """取材料正文：摘要太短就去抓全文。返回纯文本（可能为空）。"""
+    content = article.get("summary", "") or ""
+    if len(content) < 300:
+        full = extract_full_text(article["url"])
+        if full:
+            content = full
+    return content.strip()
+
+
+def _goal_for_article(article):
+    """把一篇文章转成一个临时学习目标。
+
+    为什么需要它：`card_writer` 只喂「与目标相关的证据」。证据筛选的评分是
+    `kind 权重 × 2 + 相关性`（见 evidence.select_claims），其中
+    kind 权重 2~6、相关性 0~3 —— 所以相关性是**微调而非主导**，它决定的是
+    「同档证据里谁更贴题」。主产线没有用户目标，若给一个与材料无关的通用目标，
+    这一维就恒为 0，等于白丢一档信息。
+    把标题写进 capability，相关性才有区分度：选出的是「这篇文章讲的」，
+    而不是「文章里随便哪几句」。
+
+    注意：capability/scene/success_evidence 里的通用词（「核心机制」这类）
+    也会被抽成关键词参与打分。这是可接受的——它们对所有文章一致，不产生
+    相对偏差；而真正决定取舍的是 kind 权重。
+    """
+    import schema_v2
+    title = (article.get("title") or "").strip() or "这份材料"
+    return schema_v2.make_goal(
+        key="daily",
+        capability="读懂《%s》里的核心机制" % title[:40],
+        level="有相关技术背景",
+        scene="读完能用上",
+        success_evidence="能复述",
+        milestones=["复述核心机制", "说出一个边界"],
+        daily_minutes=30,
+    )
+
+
+def generate_card_evidenced(provider, source, article, cfg=None):
+    """证据约束成卡（主产线）。返回 (card, why)——card 为 None 时 why 说明原因。
+
+    链路（每一步都已在线上跑过，这里只是按主产线的输入重新串起来）：
+        取证 → 抽证据 → 证据不足就停 → 受约束写卡 → 出题 → 配图 → 桥接 → 门禁
+    """
+    import assessment
+    import bridge_v1
+    import card_writer
+    import evidence
+    import visual
+
+    text = _material_text(article)
+    if len(text) < MIN_MATERIAL_CHARS:
+        return None, "正文太短（%d 字）" % len(text)
+
+    sid, claims = evidence.ingest_source(
+        article["url"], text,
+        title=article.get("title"), site=source.get("name"))
+    if len(claims) < evidence.MIN_CLAIMS_FOR_PACK:
+        return None, "证据不足（%d 条，需 ≥%d）" % (
+            len(claims), evidence.MIN_CLAIMS_FOR_PACK)
+
+    goal = _goal_for_article(article)
+    draft, draft_id, report = card_writer.write_card_gated(
+        provider, goal, claims,
+        source={"title": article.get("title"), "url": article.get("url")},
+        source_id=sid)
+    if not report.get("passed"):
+        return None, "写作门禁未过：%s" % _short(report.get("issues"))
+
+    items, _qreport = assessment.generate(
+        provider, draft, claims, draft_id=draft_id)
+
+    figures = []
+    try:
+        figures = visual.plan_visuals(provider, draft, claims)
+        visual.attach(draft_id, [{k: v for k, v in f.items() if k != "_svg"}
+                                 for f in figures])
+    except Exception as exc:  # noqa: BLE001 - 配图失败不该作废整张卡
+        print("    ⚠️ 配图失败（不影响出卡）：%s" % exc)
+
+    card = bridge_v1.from_draft(
+        draft_id, items=items,
+        material={"title": article.get("title"), "url": article.get("url"),
+                  "site": source.get("name"), "source_tier": "blog",
+                  "kind": "evolving"},
+        provider=provider, figures=figures, shadow=False)
+
+    ok, issues = bridge_v1.publish_gate(card)
+    if not ok:
+        # 过不了 v1 门禁就不落库：宁可当天不出，也不污染卡片库
+        return None, "v1 门禁未过：%s" % _short(issues)
+    return card, None
+
+
+PIPELINE_REPORT_KEY = "pipeline_report"
+
+
+def _write_pipeline_report(generated, skipped, cfg):
+    """把本轮结果写进 user_state，供前端在「今天一张都没出」时解释原因。
+
+    为什么需要：严格模式下当天可能一张卡都不出。如果前端只显示空白，
+    用户会读成「坏了」，而不是「今天的材料没达到标准」——这两者该给的动作
+    完全不同（前者要排查，后者要投材料或等明天）。
+    """
+    report = {
+        "date": datetime.now().strftime("%Y-%m-%d"),
+        "finished_at": datetime.now().isoformat(),
+        "generated": generated,
+        "skipped": skipped[:20],
+        "sources": len(cfg.get("sources") or []),
+    }
+    try:
+        db.set_user_state(PIPELINE_REPORT_KEY, json.dumps(report, ensure_ascii=False))
+    except Exception as exc:  # noqa: BLE001 - 报告写失败不该影响已生成的卡
+        print(f"  ⚠️ 写生产报告失败：{exc}")
+    return report
+
+
 def generate_on_demand_card(client, template, input_text):
     """按需生成卡片（T1 词汇 / T3 数学），输入来自 --input 参数，不走 RSS 抓取。"""
     from prompts import TEMPLATES  # 延迟导入，避免循环
@@ -337,17 +484,30 @@ def main():
         default=None,
         help="按需生成时的输入：t1_vocab 填英文单词，t3_math 填数学概念/问题，t4_trivia 填冷知识/趣闻，t5_skill 填实用技能/技巧",
     )
+    parser.add_argument(
+        "--legacy", action="store_true",
+        help="回退到旧路径（整篇正文塞 prompt，无证据约束）。仅在证据链路出问题时应急用。",
+    )
     args = parser.parse_args()
 
     config = load_config()
+    # 幂等建表：脚本要能自包含运行。原来只有 save_card 里调 init_db，
+    # 而 fetch_rss 一开始就要读 user_state（ETag/Last-Modified）——
+    # 在全新环境（库里还没有表）会直接失败，且失败信息是
+    # 「抓取失败：no such table: user_state」，看着像网络问题。
+    db.init_db()
 
     client = None
+    provider = None
     if not args.fetch_only:
         api_key = config.get("deepseek_api_key", "")
         if not api_key or api_key.startswith("sk-你的"):
             print("❌ config.json 里没有有效的 DeepSeek API key。")
             sys.exit(1)
         client = OpenAI(api_key=api_key, base_url=DEEPSEEK_BASE_URL)
+        # 证据链路用 provider 接口（providers.TextModelProvider），
+        # 不是裸 OpenAI client——它带 schema 校验、重试与调用审计。
+        provider = build_provider(config)
 
     # 按需生成模式：--input 提供时，直接生成单张卡，不走 RSS
     if args.input:
@@ -366,7 +526,10 @@ def main():
             print("❌ 生成失败。")
         return
 
+    import bridge_v1  # 证据链路落库走桥接层（与 v2 影子同一入口）
+
     total_generated = 0
+    skipped = []       # 未成卡的材料与原因，供前端空状态展示
     max_cards = int(config.get("daily_generate_limit", 15) or 15)
     per_source = args.limit or 2   # 每源最多生成最新 2 篇（增量过滤后），保证各源都能被覆盖
     for source in config.get("sources", []):
@@ -403,11 +566,21 @@ def main():
                 else:
                     print(f"    ⏭️  跨源重复（已有 {dup[:36]}…），跳过")
                     continue
-            card = generate_card(client, source, art, "t2_reading")
-            if card and save_card(card):
+            if args.legacy:
+                card = generate_card(client, source, art, "t2_reading")
+                saved = bool(card) and save_card(card)
+                why = None if saved else "旧路径生成失败"
+            else:
+                card, why = generate_card_evidenced(provider, source, art, config)
+                saved = bool(card) and bridge_v1.save(card)
+            if saved:
                 total_generated += 1
                 print(f"    ✅ 已生成卡片：{card.get('title', '')[:40]}")
+            else:
+                print(f"    ⏭️  未成卡：{why}")
+                skipped.append({"title": (art.get("title") or "")[:50], "why": why})
 
+    _write_pipeline_report(total_generated, skipped, config)
     print(f"\n🎉 本轮完成，共生成 {total_generated} 张卡片。")
 
 

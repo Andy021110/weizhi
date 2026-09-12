@@ -8,6 +8,7 @@ dumps / loads 还原为 list / dict。
 """
 import json
 import os
+import re
 import sqlite3
 from datetime import datetime, timedelta
 
@@ -435,6 +436,20 @@ def save_card(card, date=None):
         conn.close()
 
 
+# 中文技术内容按 300 汉字/分钟估——比通用阅读速度慢，因为卡片是要「读懂」
+# 而不是「浏览」。只求量级对：它回答的是「现在读还是等会儿」。
+_READING_CHARS_PER_MIN = 300
+_MIN_READING_CHARS = 60
+
+
+def _reading_minutes(body):
+    """按正文字数估阅读时长（分钟）。正文太短或没有时返回 None。"""
+    n = len(re.sub(r"\s", "", body or ""))
+    if n < _MIN_READING_CHARS:
+        return None
+    return max(1, int(round(n / float(_READING_CHARS_PER_MIN))))
+
+
 def _row_to_card(row):
     d = dict(row)
     d["core_points"] = _load(d.get("core_points")) or []
@@ -455,6 +470,9 @@ def _row_to_card(row):
     })
     d["_meta"] = meta
     d["_date"] = d.get("date")
+    # 阅读时长：碎片场景下「这张要花多久」比「讲了什么」更决定读不读。
+    # 放在这里算而不是让前端算——前端列表拿不到正文长度（列表刻意不下发 body）。
+    d["reading_minutes"] = _reading_minutes(d.get("body"))
     return d
 
 
@@ -948,6 +966,51 @@ def stats():
         "mastered": mastered,
         "total_reviews": total_reviews,
     }
+
+
+def mastery_dist():
+    """记忆状态分布。三桶互斥，加起来 = 总卡片数。
+
+    用于「掌握度构成条」：它回答的是「我产出了多少 vs 我真正记住了多少」。
+    这个差距用数字摆出来看不出结构，画成一条就一眼可见——范围决策里
+    「卡片库存不作为完成结果」那句话，这样才算落到了界面上。
+    """
+    conn = _conn()
+    try:
+        rows = conn.execute(
+            "SELECT COALESCE(NULLIF(memory_state, ''), 'fresh') AS bucket, "
+            "COUNT(*) AS n FROM cards GROUP BY bucket").fetchall()
+    finally:
+        conn.close()
+    out = {"fresh": 0, "reviewing": 0, "mastered": 0}
+    for r in rows:
+        b = r["bucket"]
+        out["mastered" if b == "mastered" else
+            ("fresh" if b == "fresh" else "reviewing")] += r["n"]
+    out["total"] = sum(out[k] for k in ("fresh", "reviewing", "mastered"))
+    return out
+
+
+def knowledge_map():
+    """主题 × 难度 的「已学 / 总数」。用于「知识地图矩阵」。
+
+    和 block_dist 的区别：那个告诉你「卡里有什么」，这个告诉你「你会什么」。
+    聚合出来能一眼看到「前沿·中级 118 张只学了 1 张」这类积压——
+    这些数字在列表里逐张翻是看不出来的。
+    """
+    conn = _conn()
+    try:
+        rows = conn.execute(
+            "SELECT COALESCE(NULLIF(category, ''), '通识') AS cat, "
+            "       COALESCE(NULLIF(difficulty, ''), '中级') AS diff, "
+            "       COUNT(*) AS total, "
+            "       SUM(CASE WHEN EXISTS(SELECT 1 FROM progress p "
+            "                          WHERE p.card_source_url = cards.source_url) "
+            "                THEN 1 ELSE 0 END) AS done "
+            "FROM cards GROUP BY cat, diff").fetchall()
+    finally:
+        conn.close()
+    return [dict(r) for r in rows]
 
 
 # ===== 质量巡检 M1：daily_check.py / /api/regen / /api/report 用 =====
