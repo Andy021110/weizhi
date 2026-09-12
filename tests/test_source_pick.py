@@ -225,6 +225,17 @@ def test_mark_seen_is_the_only_writer(tmp_db):
     assert pipeline.mark_seen([c]) == 0     # 重复写没有副作用
 
 
+def test_seen_store_holds_more_than_one_round(tmp_db):
+    """指纹库要能记住不止一轮。
+
+    容量太小时，被挤掉的条目会重新变成「没见过」而复活；
+    「已见」就不是可靠记录，而 mark_seen 的整套语义都建立在它可靠之上。
+    """
+    pipeline._save_seen([{"t": "fp%05d" % i, "s": 0} for i in range(5000)])
+    assert len(pipeline._load_seen()) == pipeline.SEEN_CAP
+    assert pipeline.SEEN_CAP >= 1000, "一轮就写百来条，容量必须远大于一轮"
+
+
 def test_unpicked_candidate_stays_for_next_round(tmp_db, monkeypatch):
     """被挑中处理过的记成已见；没轮到的留在池子里，过期的是终态。
 

@@ -752,9 +752,19 @@ def _load_seen():
         return []
 
 
+SEEN_CAP = 3000  # 已见指纹库容量。见 _save_seen 的说明。
+
+
 def _save_seen(seen):
-    """保存全局已见指纹（保留最近 300 条，容量可控）。每项 {t: 标题指纹, s: 内容指纹}。"""
-    db.set_user_state(GLOBAL_SEEN_KEY, json.dumps(seen[:300]))
+    """保存全局已见指纹。每项 {t: 标题指纹, s: 内容指纹}。
+
+    容量从 300 提到 3000：300 是「一次抓取最大 300 条」时代的数字，
+    那时一轮就能把库撑满，等于记忆只有一轮深。修好写指纹的时机之后，
+    一轮会写进「过期归档 + 被挑中」两批（实测约 131 条），
+    300 仍然只够记两轮——被挤掉的条目会重新变成「没见过」而复活。
+    3000 约合 12 天，够覆盖最长 30 天窗口里的大部分条目。
+    """
+    db.set_user_state(GLOBAL_SEEN_KEY, json.dumps(seen[:SEEN_CAP]))
 
 
 def mark_seen(items, dry=False):
