@@ -292,6 +292,37 @@ def lookback_table(config):
     return table
 
 
+def candidate_window(c, hours=168, hours_by_tier=None):
+    """这一条候选的时效窗口（小时）：源级 lookback_hours > 级别默认 > 全局。
+
+    逐条算而不是全局一刀切，是因为「一条 20 天前的深度长文」和
+    「一条 20 天前的快讯」根本不是一回事。
+    """
+    table = hours_by_tier or {}
+    try:
+        fallback = int(hours)
+    except (TypeError, ValueError):
+        fallback = 168
+    limit = c.get("lookback_hours") or table.get(c.get("source_tier"), fallback)
+    try:
+        return int(limit)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def is_expired(c, hours=168, hours_by_tier=None):
+    """是否已超出时效窗口（终态，可以记成已见了）。
+
+    没有发布时间的**不算过期**——源不提供时间是常态，不能因此丢掉它，
+    但也不能当它很新（pretriage 排序时排在最后）。
+    """
+    ts = _parse_ts(c.get("published_at"))
+    if not ts:
+        return False
+    return ts < datetime.now() - timedelta(
+        hours=candidate_window(c, hours, hours_by_tier))
+
+
 def resolve_tier(src):
     """源的级别：config 显式 > 域名默认 > blog。
 
@@ -339,11 +370,12 @@ def _tier_of(source):
 # 两级分工：程序筛管**能算出来的**（时效、去重、级别），模型筛管
 # **算不出来的**（值不值得读）。前者不花钱，后者花一次调用。
 
-def collect_candidates(cfg, per_source=50, dry=False):
-    """从所有源抓候选。**不产卡**——产什么由筛选之后决定。
+def collect_candidates(cfg, per_source=50):
+    """从所有源抓候选。**不产卡，也不写指纹**——产什么由筛选之后决定。
 
-    dry=True 时只算不记（--fetch-only 用）：避免「只是想看看有哪些源」
-    把增量指纹写掉，导致真正跑的时候这些文章被当成已见过。
+    这里刻意不写增量指纹（曾经写，是错的）：抓到的条目里绝大多数不会被
+    挑中，写指纹等于把它们一次性地判成「已处理」，之后永久出局。
+    指纹由 mark_seen 在条目有结论时写，见那里的说明。
     """
     out = []
     for src in (cfg.get("sources") or []):
@@ -355,7 +387,7 @@ def collect_candidates(cfg, per_source=50, dry=False):
         if not articles:
             print("  无更新")
             continue
-        fresh = filter_fresh(articles, dry=dry)
+        fresh = filter_fresh(articles)
         print("  抓到 %d 篇，新增 %d 篇" % (len(articles), len(fresh)))
         tier = resolve_tier(src)
         for a in fresh:
@@ -371,6 +403,10 @@ def collect_candidates(cfg, per_source=50, dry=False):
                 # 源级时效窗口（可空）。带上它，筛的时候才能按源算，
                 # 而不是所有源共用一刀切的 168h。
                 "lookback_hours": src.get("lookback_hours"),
+                # 指纹跟着候选走：mark_seen 时直接写，不必重算
+                # （重算有风险——summary 在候选里被截断过就对不上了）。
+                "_fp": a.get("_fp"),
+                "_sim": a.get("_sim"),
                 "title": (a.get("title") or "").strip(),
                 "url": url,
                 "summary": a.get("summary") or "",
@@ -396,29 +432,15 @@ def pretriage(candidates, hours=168, cap=30, hours_by_tier=None):
     先筛一遍再交给模型，不是为了省钱，是为了**判断质量**：
     30 个候选和 300 个候选对模型是两回事，后者会让它只挑标题顺眼的。
 
-    窗口逐条算，优先级：候选自带的源级 lookback_hours > 级别默认表 >
-    hours 兜底。逐条算而不是全局一刀切，是因为「一条 20 天前的深度长文」
+    逐条算窗口：源级 lookback_hours > 级别默认表 > hours 兜底。
+    逐条算而不是全局一刀切，是因为「一条 20 天前的深度长文」
     和「一条 20 天前的快讯」根本不是一回事。
     """
     import news
-    try:
-        fallback = int(hours)
-    except (TypeError, ValueError):
-        fallback = 168
-    table = hours_by_tier or {}
-    now = datetime.now()
     seen, fresh = set(), []
     for c in candidates:
-        ts = _parse_ts(c.get("published_at"))
-        if ts:
-            limit = c.get("lookback_hours") or table.get(
-                c.get("source_tier"), fallback)
-            try:
-                limit = int(limit)
-            except (TypeError, ValueError):
-                limit = fallback
-            if ts < now - timedelta(hours=limit):
-                continue                              # 超出该源/该级别的时效窗口
+        if is_expired(c, hours, hours_by_tier):
+            continue                              # 超出该源/该级别的时效窗口
         key = (c.get("title") or "").strip().lower()
         if key and key in seen:
             continue                                  # 同题跨源，保留先到的
@@ -735,6 +757,38 @@ def _save_seen(seen):
     db.set_user_state(GLOBAL_SEEN_KEY, json.dumps(seen[:300]))
 
 
+def mark_seen(items, dry=False):
+    """把条目记成「已处理」。这是**唯一**写指纹的入口。
+
+    为什么要把写指纹从 filter_fresh 里搬出来：
+    原来「抓到但没处理」也会被写成已见，于是有一次抓取就能把 300 条容量
+    撑满，而实际只有几篇被挑中产卡——**其余的永久出局，再也不会被考虑**。
+    现象就是「已见集合有洞」：feed 中段一批条目从没被处理过，
+    比它新的和比它旧的却都算见过。
+
+    现在的规矩：**这条已经有结论了**才写。两种结论——
+    被挑中处理过（成功、被门禁拒、跨源重复，都算），或者已超出时效窗口。
+    没被挑中但仍在窗口内的，留着给下一轮，别的源的新文章不能把它挤掉。
+
+    items 每项需带 `_fp`/`_sim`（collect_candidates 会带上），
+    没有就按 title/summary 现算。"""
+    if dry or not items:
+        return 0
+    seen = _load_seen()
+    known = {i.get("t") for i in seen}
+    fresh = []
+    for a in items:
+        fp = a.get("_fp") or _title_fp(a.get("title") or "")
+        if not fp or fp in known:
+            continue
+        fresh.append({"t": fp, "s": a.get("_sim") or _article_sim(a)})
+        known.add(fp)
+    if not fresh:
+        return 0
+    _save_seen(fresh + seen)
+    return len(fresh)
+
+
 def _is_preferred(url):
     """是否一手/官方域名（跨源重复时优先保留这些来源）。"""
     m = re.search(r"https?://([^/]+)", url or "")
@@ -742,14 +796,17 @@ def _is_preferred(url):
     return any(d == p or d.endswith("." + p) for p in PREFERRED_DOMAINS)
 
 
-def filter_fresh(articles, dry=False):
+def filter_fresh(articles):
     """全局增量 + 跨源内容去重：返回新增文章列表。
     - 标题指纹已见 → 跳过（增量）
     - 内容指纹（SimHash）与已见汉明距离 ≤3 → 跳过（跨源转载，保留先到的源）
-    dry=True 时只算不保存（fetch-only 用）。"""
+
+    **这里只读不写**。指纹由 mark_seen 在「这条有结论了」时才写——
+    详见 mark_seen 的说明：原来在这里写，等于把抓到的新条目一次性
+    全标成已见，后面没被挑中的那些就永久丢了。
+    返回的每项会带上 `_fp`/`_sim`，供后续 mark_seen 直接用。"""
     seen = _load_seen()
     fresh = []
-    new_items = []
     for a in articles:
         fp = _title_fp(a.get("title") or "")
         sim = _article_sim(a)
@@ -763,10 +820,10 @@ def filter_fresh(articles, dry=False):
                 break
         if dup or not fp:
             continue
+        a = dict(a)
+        a["_fp"] = fp
+        a["_sim"] = sim
         fresh.append(a)
-        new_items.append({"t": fp, "s": sim})
-    if new_items and not dry:
-        _save_seen(new_items + [i for i in seen if i not in new_items])
     return fresh
 
 
@@ -854,14 +911,18 @@ def _run_legacy(config, client, args, max_cards):
         print(f"  抓到 {len(articles)} 篇")
         if args.fetch_only:
             continue
-        articles = filter_fresh(articles, dry=False)
+        articles = filter_fresh(articles)
         if not articles:
             print("  无新增条目，跳过。")
             continue
         print(f"  新增 {len(articles)} 篇（取前 {per_source} 篇）")
+        # 只把**真处理过的**记成已见。取前 N 篇之外的那些留在池子里，
+        # 由下一轮接手——否则它们会像以前一样被静默丢掉。
+        attempted = []
         for art in articles[:per_source]:
             if generated >= max_cards:
                 break
+            attempted.append(art)
             print(f"  📄 {art['title'][:50]}")
             dup = db.find_similar_title(art["title"], summary=art.get("summary", ""))
             if dup and not _is_preferred(art.get("url") or ""):
@@ -875,6 +936,7 @@ def _run_legacy(config, client, args, max_cards):
             else:
                 print("    ⏭️  未成卡")
                 skipped.append({"title": art["title"][:50], "why": "旧路径生成失败"})
+        mark_seen(attempted)
     return generated, skipped
 
 
@@ -888,20 +950,24 @@ def _run_pick(config, provider, args, max_cards):
     import bridge_v1
 
     print("\n📡 收集候选")
-    candidates = collect_candidates(config, per_source=args.limit or 50,
-                                    dry=args.fetch_only)
+    candidates = collect_candidates(config, per_source=args.limit or 50)
     print(f"  候选共 {len(candidates)} 条")
     if args.fetch_only:
         for c in candidates[:40]:
             print(f"    · [{c['source_tier']}] {c['title'][:52]}")
         return 0, []
     if not candidates:
+        print("  本轮没有新候选。")
         return 0, []
 
     # 第一级：程序筛（不花模型调用）
     hours = int(config.get("lookback_hours", 168) or 168)
     cap = int(config.get("candidate_limit", 30) or 30)
     table = lookback_table(config)
+    # 已过期的候选是终态：不会再被考虑，所以现在就记成已见，
+    # 免得每轮都重新评估一遍同一批过期条目。
+    expired = [c for c in candidates if is_expired(c, hours, table)]
+    mark_seen(expired)
     pool = pretriage(candidates, hours=hours, cap=cap, hours_by_tier=table)
     # 把窗口策略打出来：出卡少的时候，第一个要回答的问题就是
     # 「是没内容，还是窗口把人拦了」——日志里没有这行就得回头猜。
@@ -910,7 +976,8 @@ def _run_pick(config, provider, args, max_cards):
         by_hours.setdefault(h, []).append(tier_name)
     desc = "、".join("%dh(%s)" % (h, "/".join(sorted(names)))
                      for h, names in sorted(by_hours.items()))
-    print(f"  时效窗口 {desc}；同题去重后 {len(pool)} 条")
+    print(f"  时效窗口 {desc}；同题去重后 {len(pool)} 条"
+          + (f"（另有 {len(expired)} 条过期，已归档）" if expired else ""))
     if not pool:
         print("  候选全部超出时效窗口，本轮不产出。")
         return 0, []
@@ -925,9 +992,15 @@ def _run_pick(config, provider, args, max_cards):
             print(f"      {c['why']}")
 
     generated, skipped = 0, []
+    # 只有**真处理过**的才记成已见。被 cap 切掉、或本轮没轮到的，
+    # 留在候选池里等下一轮——这正是让「候选池」名副其实的关键：
+    # 否则模型只是在「这 12 小时新到的几条」里挑，而不是在窗口内所有
+    # 未读过的文章里挑，慢源的好文章会被快源的噪音挤掉。
+    attempted = []
     for cand in selected:
         if generated >= max_cards:
             break
+        attempted.append(cand)
         title = cand.get("title") or ""
         print(f"\n📄 {title[:50]}")
         # 跨源查重：重复时一手域名优先替换旧卡，否则跳过
@@ -948,6 +1021,8 @@ def _run_pick(config, provider, args, max_cards):
         else:
             print(f"    ⏭️  未成卡：{why}")
             skipped.append({"title": title[:50], "why": why})
+    # 门禁没过 / 跨源重复也算「有结论」：不然同一篇会每轮都占一个名额重试。
+    mark_seen(attempted)
     return generated, skipped
 
 

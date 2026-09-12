@@ -186,6 +186,88 @@ def test_collect_candidates_carries_source_lookback(tmp_db, monkeypatch):
     assert out[0]["source_tier"] == "blog"
 
 
+# ---------- 「见过」≠「产过」 ----------
+#
+# 这一组守的是一个曾经真实存在的缺陷：filter_fresh 会给它抓到的**全部**新条目
+# 写指纹，可后面只有几篇会被挑中产卡。结果是「已见集合有洞」——
+# feed 中段一批条目从没被处理过，比它新的和比它旧的却都算见过。
+# 眼见的现象是：18:00 那轮从某博客**四个月前的**文章产了卡。
+
+class _Args:
+    """_run_pick / _run_legacy 需要的命令行参数。"""
+
+    def __init__(self, limit=None, fetch_only=False, legacy=False):
+        self.limit = limit
+        self.fetch_only = fetch_only
+        self.legacy = legacy
+
+
+def _with_fp(c):
+    c["_fp"] = pipeline._title_fp(c["title"])
+    c["_sim"] = pipeline._article_sim(c)
+    return c
+
+
+def test_is_expired_uses_per_tier_window():
+    table = pipeline.LOOKBACK_HOURS_BY_TIER
+    assert pipeline.is_expired(_cand("快讯旧稿", tier="media", ago_hours=20 * 24),
+                               168, table)
+    assert not pipeline.is_expired(_cand("博客旧稿", tier="blog", ago_hours=20 * 24),
+                                   168, table)
+
+
+def test_mark_seen_is_the_only_writer(tmp_db):
+    """filter_fresh 只读；mark_seen 才写。抓一次不等于处理过。"""
+    c = _cand("一篇还没结论的文章", ago_hours=1)
+    assert pipeline.mark_seen([c]) == 1
+    seen = {i["t"] for i in pipeline._load_seen()}
+    assert pipeline._title_fp(c["title"]) in seen
+    assert pipeline.mark_seen([c]) == 0     # 重复写没有副作用
+
+
+def test_unpicked_candidate_stays_for_next_round(tmp_db, monkeypatch):
+    """被挑中处理过的记成已见；没轮到的留在池子里，过期的是终态。
+
+    如果抓一次就全标已见，模型只是在「这 12 小时新到的几条」里挑，
+    慢源的好文章会被快源的噪音挤掉——那正是加候选池要解决的问题。
+    """
+    picked = _with_fp(_cand("被挑中的", tier="blog", ago_hours=2))
+    waiting = _with_fp(_cand("没轮到的", tier="blog", ago_hours=3))
+    stale = _with_fp(_cand("过期的", tier="media", ago_hours=24 * 20))
+    monkeypatch.setattr(pipeline, "collect_candidates",
+                        lambda cfg, per_source=50: [picked, waiting, stale])
+    monkeypatch.setattr(pipeline, "rank_candidates",
+                        lambda provider, pool, limit=5: ([picked], "model"))
+    monkeypatch.setattr(pipeline, "generate_card_evidenced",
+                        lambda provider, art, cand, cfg: (None, "测试：故意不成卡"))
+
+    gen, skipped = pipeline._run_pick(
+        {"candidate_limit": 30, "daily_pick_limit": 5, "lookback_hours": 168},
+        None, _Args(), 15)
+
+    assert gen == 0 and skipped
+    seen = {i["t"] for i in pipeline._load_seen()}
+    assert pipeline._title_fp("被挑中的") in seen       # 有结论了
+    assert pipeline._title_fp("过期的") in seen         # 过期是终态
+    assert pipeline._title_fp("没轮到的") not in seen   # 还在池子里等下一轮
+
+
+def test_legacy_marks_only_processed(tmp_db, monkeypatch):
+    """应急的旧路径同样只记处理过的，否则会每轮重复产同一批。"""
+    arts = [{"title": "甲篇足够长的标题", "url": "https://x/a",
+             "summary": "甲篇摘要内容足够长，用于计算 SimHash 内容指纹"},
+            {"title": "乙篇足够长的标题", "url": "https://x/b",
+             "summary": "乙篇摘要内容足够长，用于计算 SimHash 内容指纹"}]
+    monkeypatch.setattr(pipeline, "fetch_rss", lambda src, limit=None: list(arts))
+    monkeypatch.setattr(pipeline, "generate_card", lambda *a, **k: None)
+    cfg = {"sources": [{"name": "某源", "rss": "https://x/feed", "category": "前沿"}]}
+    pipeline._run_legacy(cfg, None, _Args(limit=1), 15)
+
+    seen = {i["t"] for i in pipeline._load_seen()}
+    assert pipeline._title_fp("甲篇足够长的标题") in seen
+    assert pipeline._title_fp("乙篇足够长的标题") not in seen   # 留到下一轮
+
+
 # ---------- 模型筛（含降级） ----------
 
 class _FakeProvider:

@@ -6,7 +6,7 @@
 """
 import db
 from conftest import make_card
-from pipeline import _article_sim, filter_fresh
+from pipeline import _article_sim, filter_fresh, mark_seen
 
 
 def test_norm_title_strips_punct():
@@ -65,17 +65,31 @@ def test_find_similar_title_short_only_exact(tmp_db):
 
 
 def test_filter_fresh_dedup_cross_source(tmp_db):
-    """第一源先到 → 收录；转载（改标题同摘要）→ 拦截。"""
+    """第一源先到 → 收录；转载（改标题同摘要）→ 拦截。
+
+    注意 filter_fresh 只读不写：指纹要显式 mark_seen。
+    这条同时守住新契约——**抓到不等于处理过**。"""
     a1 = [{"title": "OpenAI 发布新模型 GPT-5.5 上下文窗口翻倍",
            "summary": "OpenAI 今日发布新模型，上下文窗口从 100 万提升到 200 万 token"}]
     a2 = [{"title": "重磅！GPT-5.5 来了：上下文窗口竟然翻倍了",
            "summary": "OpenAI 今日发布新模型，上下文窗口从 100 万提升到 200 万 token"}]
-    assert len(filter_fresh(a1, dry=False)) == 1   # 源 A 收录
-    assert len(filter_fresh(a2, dry=False)) == 0   # 源 B 转载被拦
+    got = filter_fresh(a1)
+    assert len(got) == 1                      # 源 A 收录
+    mark_seen(got)                            # 有结论了才写指纹
+    assert len(filter_fresh(a2)) == 0         # 源 B 转载被拦
+
+
+def test_filter_fresh_alone_does_not_mark_seen(tmp_db):
+    """抓一次不算处理过——否则没被挑中的那些会被静默丢掉。"""
+    a = [{"title": "某篇还没被挑中的文章", "summary": "摘要内容足够长，可以用来算 SimHash 指纹"}]
+    assert len(filter_fresh(a)) == 1
+    assert len(filter_fresh(a)) == 1   # 再抓一次仍在，说明没被写成已见
 
 
 def test_filter_fresh_unrelated_passes(tmp_db):
     a1 = [{"title": "自注意力机制详解", "summary": "自注意力让每个位置关注全部位置的相关程度"}]
-    assert len(filter_fresh(a1, dry=False)) == 1
+    got = filter_fresh(a1)
+    assert len(got) == 1
+    mark_seen(got)
     a2 = [{"title": "贝叶斯定理入门", "summary": "贝叶斯定理描述先验概率如何被证据更新为后验"}]
-    assert len(filter_fresh(a2, dry=False)) == 1   # 无关新内容放行
+    assert len(filter_fresh(a2)) == 1   # 无关新内容放行
