@@ -6,6 +6,7 @@
 """
 import pytest
 
+import db
 import reader
 import review_flow
 from conftest import make_card
@@ -25,6 +26,89 @@ def test_int_arg_keeps_zero(value, expect):
 def test_int_arg_custom_default():
     assert reader._int_arg(None, default=0) == 0
     assert reader._int_arg("x", default=7) == 7
+
+
+# ---------- 演示模式（只读口令） ----------
+#
+# 这个实例要放出去给人看（作品集/面试），所以「能看」和「能改」必须分开。
+# 这组测试守的就是那条线：演示口令一条写都做不了，而且
+# 演示口令留空时不能变成「空字符串就能进」的后门。
+
+OWNER_TOKEN = "OWNER-abc"
+DEMO_TOKEN = "DEMO-xyz"
+
+
+def _tokens(demo=True, owner=True):
+    t = {}
+    if owner:
+        t[OWNER_TOKEN] = reader.ROLE_OWNER
+    if demo:
+        t[DEMO_TOKEN] = reader.ROLE_DEMO
+    return t
+
+
+def test_demo_token_maps_to_demo_role():
+    roles = _tokens()
+    assert reader.resolve_role(DEMO_TOKEN, roles) == reader.ROLE_DEMO
+    assert reader.resolve_role(OWNER_TOKEN, roles) == reader.ROLE_OWNER
+    assert reader.resolve_role("乱写的口令", roles) is None
+
+
+def test_blank_token_is_not_a_backdoor():
+    """demo_token 留空/只有空格时，不能让空口令通过。"""
+    assert reader.resolve_role("", _tokens(demo=False)) is None
+    assert reader.resolve_role("   ", _tokens(demo=False)) is None
+
+
+def test_no_token_configured_means_owner():
+    """老部署一个 token 都没配：必须继续可用，不能把自己锁在门外。"""
+    assert reader.resolve_role("", {}) == reader.ROLE_OWNER
+    assert reader.resolve_role("随便什么", {}) == reader.ROLE_OWNER
+
+
+def test_load_tokens_skips_empty_values(monkeypatch):
+    monkeypatch.setattr(reader, "load_config", lambda: {
+        "access_token": OWNER_TOKEN, "demo_token": "  "})
+    assert reader.load_tokens() == {OWNER_TOKEN: reader.ROLE_OWNER}
+
+
+def test_demo_role_cannot_write_anything():
+    """演示 = 零写入。唯一例外是 /api/verify——它是拿口令换角色的入口本身。"""
+    assert reader.demo_can_write("/api/verify")
+    for p in ("/api/create", "/api/done", "/api/delete", "/api/edit",
+              "/api/review", "/api/review/master", "/api/review/skip",
+              "/api/favorite", "/api/state", "/api/event", "/api/grade",
+              "/api/plan/create", "/api/plan/outline", "/api/plan/classify",
+              "/api/plan/disambiguate", "/api/plan/update", "/api/plan/delete",
+              "/api/ledger/encounter", "/api/ledger/make-card",
+              "/api/regen", "/api/rollback", "/api/notifications/read"):
+        assert not reader.demo_can_write(p), "%s 对演示角色必须是只读" % p
+
+
+def test_new_write_endpoints_are_locked_by_default():
+    """写锁是「默认拒绝」而不是「逐个列举允许」。
+    以后新增写接口忘了改这里，demo 也进不去——这正是要的方向。"""
+    assert not reader.demo_can_write("/api/以后新加的写接口")
+
+
+def test_demo_access_log_separates_me_from_visitors(tmp_db):
+    """能分清「我自己用」和「别人用」——这是要演示口令的另一个原因。"""
+    db.record_demo_access("203.0.113.9", "GET", "/api/cards", False)
+    db.record_demo_access("203.0.113.9", "POST", "/api/create", True)
+    db.record_demo_access("198.51.100.4", "GET", "/api/discover", False)
+    s = db.demo_access_summary()
+    assert s["requests"] == 3
+    assert s["visitors"] == 2          # 两个访客，不是一个
+    assert s["blocked"] == 1           # 想生成卡被拦了一次
+    assert s["recent"][0]["path"] == "/api/discover"
+
+
+def test_demo_access_log_is_capped(tmp_db):
+    """流水要封顶：留着的意义是观察，不是归档。"""
+    for i in range(30):
+        db.record_demo_access("10.0.0.%d" % (i % 3), "GET", "/api/cards", False,
+                             keep=10)
+    assert db.demo_access_summary()["requests"] == 10
 
 
 # ---------- 密封辅助 ----------

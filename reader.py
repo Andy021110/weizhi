@@ -145,6 +145,54 @@ def load_access_token():
     return load_config().get("access_token", "")
 
 
+# ===== 访问角色 =====
+#
+# 为什么要有第二个 token：这个实例要放出去给人看（作品集/面试），
+# 但『能看』和『能改』必须是两件事。演示 token 是**只读**的：
+# 每条 GET 都能走，每条写操作都被挡在门外。
+#
+# 为什么不复用同一个 token 加个 ?demo=1 参数：那个参数随手就能删掉，
+# 而权限不该由客户端说了算。两个 token 一分，服务端说了算，
+# 顺带还能把「我自己用」和「别人用」在访问日志里分开。
+ROLE_OWNER = "owner"
+ROLE_DEMO = "demo"
+
+
+def load_tokens():
+    """token -> 角色。空 token 不要（那会变成「谁都能进」的后门）。"""
+    cfg = load_config()
+    out = {}
+    for key, role in (("access_token", ROLE_OWNER), ("demo_token", ROLE_DEMO)):
+        t = (cfg.get(key) or "").strip()
+        if t:
+            out[t] = role
+    return out
+
+
+def resolve_role(token, tokens=None):
+    """token 对应的角色；不认识返回 None。
+
+    一个容易踩的分支：**一个 token 都没配**时一律当 owner。
+    那是老部署的既有行为（原来完全不鉴权），不能因为新加了演示口令
+    就把自己锁在门外——上线顺序一旦搞反，表现是「自己也进不去」。
+    """
+    tokens = load_tokens() if tokens is None else tokens
+    if not tokens:
+        return ROLE_OWNER
+    return tokens.get((token or "").strip())
+
+
+def demo_can_write(path):
+    """演示 token 能不能写这个路径。
+
+    目前是「一条都不许」，只有一个例外：/api/verify 本身不是写操作，
+    它是前端用来确认口令的地方，挡掉的话演示口令根本进不去。
+    规则宁可简单到能背下来——「演示 = 零写入」——
+    也不要留一串例外，例外会随接口增加而腐化。
+    """
+    return path == "/api/verify"
+
+
 def load_push_limit():
     """从 config.json 读取每日推送上限，默认 15。"""
     try:
@@ -1002,29 +1050,62 @@ def load_cards(date=None):
 
 
 class ReaderHandler(BaseHTTPRequestHandler):
-    def _check_auth(self, qs):
-        """校验访问 token。token 从 URL ?key= 或 header X-Auth-Token 读。"""
-        token = load_access_token()
-        if not token:
-            return True  # 未配置 token，不鉴权
+    def _role(self, qs):
+        """本次请求的角色。token 从 URL ?key= 或 header X-Auth-Token 读。"""
         provided = (qs.get("key") or [None])[0] or self.headers.get("X-Auth-Token", "")
-        return provided == token
+        return resolve_role(provided)
 
-    def _forbidden(self):
-        body = b'{"error":"forbidden"}'
+    def _forbidden(self, payload=None):
+        body = json.dumps(payload or {"error": "forbidden"},
+                          ensure_ascii=False).encode("utf-8")
         self.send_response(403)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
+    def _client_ip(self):
+        """真实来访 IP。服务在 nginx 后面，直连地址永远是 127.0.0.1——
+        只看 self.client_address 会把所有访客记成同一个人。"""
+        fwd = self.headers.get("X-Forwarded-For", "")
+        if fwd:
+            return fwd.split(",")[0].strip()
+        return (self.headers.get("X-Real-IP")
+                or (self.client_address[0] if self.client_address else ""))
+
+    def _log_demo_access(self, method, path, blocked):
+        """只记演示角色的访问，用来区分「我自己用」和「别人用」。"""
+        try:
+            db.record_demo_access(self._client_ip(), method, path, blocked,
+                                  self.headers.get("User-Agent", "")[:80])
+        except Exception:  # noqa: BLE001 - 记日志失败绝不能影响正常响应
+            pass
+
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
         qs = parse_qs(parsed.query)
 
-        if path.startswith("/api/") and not self._check_auth(qs):
+        role = self._role(qs)
+        if path.startswith("/api/") and role is None:
             self._forbidden()
+            return
+        if role == ROLE_DEMO and path.startswith("/api/"):
+            self._log_demo_access("GET", path, False)
+
+        if path == "/api/me":
+            # 前端靠它决定要不要切成只读界面。放在最前面：
+            # 它必须永远可用，否则演示模式的前端拿不到自己的角色。
+            self._send_json({"role": role or ROLE_OWNER})
+            return
+
+        if path == "/api/demo/summary":
+            # 只给自己看：演示用户的访问流水。演示角色当然不该看到
+            # 「有几个访客在看我」——那不是给他看的东西。
+            if role != ROLE_OWNER:
+                self._forbidden()
+                return
+            self._send_json(db.demo_access_summary())
             return
 
         if path == "/api/dates":
@@ -1170,14 +1251,27 @@ class ReaderHandler(BaseHTTPRequestHandler):
             self._send_json({"error": "无效的 JSON"})
             return
 
-        if path.startswith("/api/") and path != "/api/verify" and not self._check_auth(qs):
+        # /api/verify 例外：它是「拿口令换角色」的入口本身，不该要求先有角色
+        if path == "/api/verify":
+            role = resolve_role(req.get("token", ""))
+            self._send_json({"ok": role is not None, "role": role})
+            return
+
+        role = self._role(qs)
+        if path.startswith("/api/") and role is None:
             self._forbidden()
             return
 
-        if path == "/api/verify":
-            ok = bool(load_access_token()) and req.get("token", "") == load_access_token()
-            self._send_json({"ok": ok})
+        # 演示角色：零写入。挡在这里而不是逐个接口里判——
+        # 逐接口判的话，以后新增一个写接口忘了加判断，
+        # 表现是「演示用户也能改数据」，而且不会报错。
+        if role == ROLE_DEMO and not demo_can_write(path):
+            self._log_demo_access("POST", path, True)
+            self._forbidden({"error": "readonly",
+                             "message": "演示模式：可以随意翻看，但不会改动任何数据。"})
             return
+        if role == ROLE_DEMO:
+            self._log_demo_access("POST", path, False)
 
         if path == "/api/ledger/encounter":
             concepts = req.get("concepts") or []

@@ -38,6 +38,14 @@ CREATE TABLE IF NOT EXISTS user_state (
   key TEXT PRIMARY KEY, value TEXT
 );
 
+-- 演示用户（只读口令）的访问流水。存在的意义只有一个：
+-- 把这个实例放出去之后，能分清「我自己在用」和「别人点进来看了」。
+CREATE TABLE IF NOT EXISTS demo_access (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts TEXT, ip TEXT, method TEXT, path TEXT,
+  blocked INTEGER DEFAULT 0, ua TEXT
+);
+
 CREATE TABLE IF NOT EXISTS plans (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   title TEXT,
@@ -614,6 +622,54 @@ def set_user_state(key, value):
         conn.commit()
     finally:
         conn.close()
+
+
+DEMO_ACCESS_KEEP = 2000
+
+
+def record_demo_access(ip, method, path, blocked=False, ua="",
+                       keep=DEMO_ACCESS_KEEP):
+    """记一条演示访问流水。
+
+    这是**观察用的流水**，不是档案：只留最近 keep 条，老的自然挤掉。
+    留着不删会让这张表变成没人看的垃圾堆，反而拖慢每次请求。
+    """
+    conn = _conn()
+    try:
+        conn.execute(
+            "INSERT INTO demo_access (ts, ip, method, path, blocked, ua)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (datetime.now().isoformat(timespec="seconds"), ip or "",
+             method or "", path or "", 1 if blocked else 0, ua or ""))
+        conn.execute(
+            "DELETE FROM demo_access WHERE id <= (SELECT MAX(id) FROM demo_access)"
+            " - ?", (int(keep),))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def demo_access_summary(recent=20):
+    """演示访问概览：有几个人、看了多少次、想改却被拦了几次、最近记录。"""
+    conn = _conn()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) n, COUNT(DISTINCT ip) ips,"
+            " SUM(blocked) blocked, MIN(ts) first, MAX(ts) last"
+            " FROM demo_access").fetchone()
+        rows = conn.execute(
+            "SELECT ts, ip, method, path, blocked FROM demo_access"
+            " ORDER BY id DESC LIMIT ?", (int(recent),)).fetchall()
+    finally:
+        conn.close()
+    return {
+        "requests": row["n"] or 0,
+        "visitors": row["ips"] or 0,
+        "blocked": row["blocked"] or 0,
+        "first": row["first"],
+        "last": row["last"],
+        "recent": [dict(r) for r in rows],
+    }
 
 
 def get_all_state():

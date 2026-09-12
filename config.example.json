@@ -1,6 +1,7 @@
 {
   "deepseek_api_key": "sk-你的key填这里",
   "access_token": "自定义访问口令",
+  "demo_token": "演示口令（只读，可以公开写进 README）",
   "review_limit": 30,
   "daily_generate_limit": 15,
   "daily_pick_limit": 5,

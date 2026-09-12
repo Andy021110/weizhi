@@ -584,6 +584,18 @@
   .notif-date { font-size: 11px; color: var(--text-3); flex-shrink: 0; }
   .notif-body { font-size: 12px; color: var(--text-2); margin-top: 4px; line-height: 1.6; }
   .notif-go { display: block; color: var(--primary); font-weight: 700; margin-top: 4px; font-size: 12px; }
+  /* 演示模式（只读口令）。要显眼但不能吵——它是说明，不是警报。
+     配色借用已有的 amber，不新造色。 */
+  .demo-banner { margin: 0 16px 10px; padding: 10px 12px; border-radius: var(--radius-sm);
+                 background: var(--amber-soft); border: 1px solid rgba(185,133,31,.28);
+                 font-size: 12px; color: var(--amber); line-height: 1.65; }
+  .demo-banner b { color: var(--amber); font-weight: 700; }
+  .demo-toast { position: fixed; left: 50%; bottom: 34px; transform: translateX(-50%) translateY(8px);
+                max-width: 300px; padding: 11px 16px; border-radius: 12px;
+                background: rgba(43,43,40,.94); color: #fff; font-size: 12.5px;
+                line-height: 1.6; z-index: 200; opacity: 0; pointer-events: none;
+                transition: opacity .22s, transform .22s; text-align: center; }
+  .demo-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   .onboard-overlay { position: fixed; inset: 0; z-index: 110; background: rgba(43,43,40,.5); display: flex; align-items: center; justify-content: center; padding: 24px; }
   .onboard-box { width: 100%; max-width: 360px; background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 28px 24px; }
   .onboard-title { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
@@ -627,6 +639,14 @@
     </div>
     <div class="date-scroll" id="dateScroll"></div>
   </header>
+
+  <!-- 演示模式提示。只在用演示口令进来时出现：让访客一开始就知道
+       「这里能随便看，但不会改动任何东西」，而不是点了半天才发现按钮没反应。 -->
+  <div class="demo-banner" id="demoBanner" style="display:none">
+    <b>演示模式 · 只读</b><br>
+    这是一个真实在跑的实例：内容每天自动产出、质量会自动巡检修复。
+    你可以随意翻看，但新增、编辑、标记已学等操作不会生效。
+  </div>
 
   <main class="content">
     <!-- 列表页 -->
@@ -816,10 +836,39 @@
     view: 'list',
     subView: null,   // 'stats' | 'fav'：统计/收藏子视图（需要返回按钮）
     detailIndex: null,
-    quiz: { started: false, index: 0, score: 0, done: false, answered: false }
+    quiz: { started: false, index: 0, score: 0, done: false, answered: false },
+    role: 'owner'    // 'owner' | 'demo'：演示口令进来的是只读访客
   };
 
   var $ = function (id) { return document.getElementById(id); };
+
+  // ---------- 演示模式（只读） ----------
+  // 判断放在服务端（/api/me 返回角色），前端只负责「把不可用说清楚」。
+  // 真正的写锁在服务端——前端这些只是体验，绕过去也改不动数据。
+
+  function demoToast(msg) {
+    var el = $('demoToast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'demoToast';
+      el.className = 'demo-toast';
+      document.body.appendChild(el);
+    }
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(demoToast._t);
+    demoToast._t = setTimeout(function () { el.classList.remove('show'); }, 2600);
+  }
+
+  function applyRole(role) {
+    state.role = role === 'demo' ? 'demo' : 'owner';
+    if (state.role !== 'demo') return;
+    $('demoBanner').style.display = 'block';
+    // 刻意**不隐藏**「新建知识 / 建计划」这些入口：访客该看到这个产品
+    // 有什么能力，点下去再由 postJSON 统一给一句「只读」——
+    // 把按钮藏起来会让产品显得比实际小，而藏了之后
+    // 「能不能用」这件事就没法自证了。
+  }
 
   // ---------- 线性图标库（替换 emoji，贴合设计系统：细线/圆角/currentColor） ----------
   var ICONS = {
@@ -939,7 +988,16 @@
   }
 
   // ---------- 服务器状态同步（localStorage 作缓存/降级，服务器为准） ----------
+  // 埋点不必弹提示：它是后台上报，不是用户动作，弹出来只会让人以为点错了。
+  var DEMO_SILENT_PATHS = { '/api/event': 1 };
+
   function postJSON(url, body) {
+    if (state.role === 'demo') {
+      if (!DEMO_SILENT_PATHS[url]) {
+        demoToast('演示模式 · 只读：这一步不会改动数据');
+      }
+      return Promise.reject(new Error('demo-readonly'));
+    }
     return fetch(url, {
       method: 'POST',
       headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
@@ -3455,6 +3513,7 @@
       if (data.ok) {
         try { localStorage.setItem(TOKEN_KEY, t); } catch (e) {}
         $('authOverlay').style.display = 'none';
+        applyRole(data.role);
         loadServerState();
         loadDates().then(loadCards);
       } else {
@@ -3470,6 +3529,11 @@
 
   renderStats();
   if (ensureAuth()) {
+    // 先问服务端「我是谁」，再按角色决定界面该显示什么按钮
+    fetch('/api/me', { headers: authHeaders() })
+      .then(function (r) { return r.json(); })
+      .then(function (d) { applyRole((d || {}).role); })
+      .catch(function () { /* 拿不到角色就按 owner 走，服务端仍有写锁 */ });
     loadServerState();
     loadDates().then(loadCards);
     loadPlans();
