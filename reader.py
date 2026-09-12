@@ -114,6 +114,31 @@ def _sealed_one(card):
                      "open_question", "has_open_question")}
 
 
+# 单卡详情下发给前端的字段白名单。**不要**加入 _gen_input / _bridge 这类
+# 内部数据——这个响应是直接给浏览器的。
+CARD_DETAIL_KEYS = (
+    "source_url", "title", "template", "summary", "body", "difficulty",
+    "timeliness", "credibility", "published", "author", "source",
+    "think_question", "think_answer", "core_points", "_meta",
+    # 以下四项缺了都不会报错，只会「界面少一块」：
+    # figures → 配图在列表里点开就消失；favorite → 收藏按钮状态错；
+    # _date → 顶部日期徽标空白；category → 分类徽标变成兜底文字。
+    "figures", "favorite", "_date", "category",
+)
+
+
+def card_detail(card):
+    """单卡详情（发现层打开、badcase 展开）要用的字段 + 密封后的题库。
+
+    和 `/api/cards` 走同一套密封，避免两个接口一个封一个不封。
+    """
+    if not card:
+        return None
+    picked = {k: card.get(k) for k in CARD_DETAIL_KEYS if k in card}
+    picked.update(_sealed_one(card))
+    return picked
+
+
 def load_access_token():
     """从 config.json 读取访问 token（为空则不鉴权）。"""
     return load_config().get("access_token", "")
@@ -168,6 +193,66 @@ def _load_reports(days=7):
         except (OSError, json.JSONDecodeError):
             continue
     return reports
+
+
+def build_discover(limit=3):
+    """发现层：把「不再推送」的内容归到一处，由用户主动来逛。
+
+    两块内容来源不同，但性质相同——都是「不该打扰用户、但值得被看到」的东西：
+
+    - **picks**：daily_agent 每天从新卡里挑的 Top 3 荐读。范围决策把它从推送
+      里拿了下来（内容发现应该是用户主动去逛），但当时没给它留展示位置，
+      数据只能躺在 `user_state.daily_picks` 里——等于这个能力悄悄消失了。
+      这个接口就是它的出口。
+    - **lab**：v2 的最近产出（影子卡）。v2 还没接管推送，这里是它唯一的入口；
+      没有它，评审要记得去翻历史日期才能看到 v2 到底做了什么。
+
+    两者都只读，不产生任何写入。
+    """
+    picks = []
+    raw = db.get_user_state("daily_picks")
+    if raw:
+        try:
+            parsed = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            parsed = []
+        for p in (parsed or [])[:limit]:
+            if not isinstance(p, dict) or not p.get("source_url"):
+                continue
+            picks.append({
+                "source_url": p.get("source_url"),
+                "title": str(p.get("title") or "")[:40],
+                "why": str(p.get("why") or "")[:80],
+                "from": "agent",
+            })
+
+    # daily_agent 被明确要求「没有好卡就不给」，所以它经常什么都挑不出来。
+    # 但发现层是「主动来逛」的地方，空着一块会被读成坏了——退化成如实列出
+    # 今日新卡。这不叫替 Agent 硬凑推荐：推荐语换成了卡片自己的摘要，
+    # 前端也按 `from` 用不同文案呈现。
+    if not picks:
+        import daily_agent
+        for p in daily_agent.today_picks()[:limit]:
+            if not p.get("source_url"):
+                continue
+            picks.append({
+                "source_url": p.get("source_url"),
+                "title": str(p.get("title") or "")[:40],
+                "why": str(p.get("summary") or "")[:80],
+                "from": "today",
+            })
+
+    lab = []
+    for c in db.shadow_cards(limit=limit):
+        lab.append({
+            "source_url": c.get("source_url"),
+            "title": c.get("title") or "",
+            "summary": c.get("summary") or "",
+            "date": c.get("_date") or c.get("date") or "",
+            "figures": len(c.get("figures") or []),
+            "questions": len(c.get("quiz") or []) + len(c.get("review_quiz") or []),
+        })
+    return {"picks": picks, "lab": lab}
 
 
 def build_dashboard():
@@ -978,20 +1063,12 @@ class ReaderHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/card":
-            # 单卡详情（badcase 展开查看用）：按 source_url 取完整内容
+            # 单卡详情（badcase 展开、发现层打开用）：按 source_url 取完整内容
             src = (qs.get("source_url") or [""])[0]
             card = db.get_card(src) if src else None
-            if not card:
-                self._send_json({"card": None})
-                return
-            # 只返回前端展示所需字段，避免携带 _gen_input 等内部数据
-            keys = ["source_url", "title", "template", "summary", "body", "difficulty",
-                    "timeliness", "credibility", "published", "author", "source",
-                    "think_question", "think_answer", "core_points", "_meta"]
-            picked = {k: card.get(k) for k in keys if k in card}
-            # 题库与简答题参考答案一并密封：这个接口同样返回给浏览器
-            picked.update(_sealed_one(card))
-            self._send_json({"card": picked})
+            # 字段白名单与密封都在 card_detail 一处实现，避免这个接口和
+            # /api/cards 各维护一份——两份清单迟早漂移，而漂移不报错。
+            self._send_json({"card": card_detail(card)})
             return
 
         if path == "/api/revisions":
@@ -1006,6 +1083,10 @@ class ReaderHandler(BaseHTTPRequestHandler):
 
         if path == "/api/favorites":
             self._send_json({"cards": db.load_favorites()})
+            return
+
+        if path == "/api/discover":
+            self._send_json(build_discover())
             return
 
         if path == "/api/stats":

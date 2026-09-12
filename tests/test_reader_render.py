@@ -518,3 +518,66 @@ def test_preview_renderer_has_everything_it_needs():
                  "步骤", "别这么做", "核心观点", "看图理解", "想一想"):
         assert must in html, "预览漏渲染了 %s" % must
     assert "<svg" in html
+
+
+# ---------- 发现层渲染 ----------
+
+def _run_discover(data):
+    """在 node 里对 data 调一次 renderDiscover，返回 HTML 字符串。"""
+    src = open(READER, encoding="utf-8").read()
+    js = "\n".join([
+        _extract(src, "escapeHtml"),
+        _extract(src, "renderDiscover"),
+        "var D = %s;" % json.dumps(data, ensure_ascii=False),
+        "process.stdout.write(JSON.stringify(renderDiscover(D)));",
+    ])
+    out = subprocess.run([_node(), "-e", js], capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr[-500:]
+    return json.loads(out.stdout)
+
+
+def test_discover_renders_picks_with_reason():
+    html = _run_discover({"picks": [{"source_url": "https://x/1", "title": "第一篇",
+                                     "why": "讲清了机制为什么这样设计"}], "lab": []})
+    assert "第一篇" in html
+    assert "讲清了机制为什么这样设计" in html, "只给标题不给理由，荐读就退化成一条链接"
+    assert 'data-url="https://x/1"' in html
+
+
+def test_discover_shows_v2_lab_with_tags():
+    """v2 还没进推送，发现层是它唯一的入口——配图数必须露出来，
+    否则评审在点开之前看不出这张卡到底有没有图。"""
+    html = _run_discover({"picks": [], "lab": [{
+        "source_url": "v2:a", "title": "实验卡", "summary": "摘要",
+        "date": "2026-09-11", "figures": 3, "questions": 4}]})
+    assert "实验卡" in html
+    assert "配图 3" in html and "题 4" in html and "2026-09-11" in html
+
+
+def test_discover_empty_states_are_explicit():
+    """空状态要给一句话，不能是一片空白——空白会被读成「坏了」。"""
+    html = _run_discover({})
+    assert "今天没有单独值得推荐的卡" in html
+    assert "还没有 v2 产出的卡" in html
+
+
+def test_discover_labels_rule_fallback_differently():
+    """「Agent 挑的」和「今天有什么」是两种可信度，标题不能混。"""
+    html = _run_discover({"picks": [{"source_url": "u", "title": "t", "why": "w",
+                                     "from": "today"}], "lab": []})
+    assert "今天的新卡" in html
+    assert "为你挑的" not in html
+
+    html2 = _run_discover({"picks": [{"source_url": "u", "title": "t", "why": "w",
+                                      "from": "agent"}], "lab": []})
+    assert "为你挑的" in html2
+
+
+def test_discover_escapes_text():
+    html = _run_discover({
+        "picks": [{"source_url": "https://x/1", "title": "<script>alert(1)</script>",
+                   "why": "w"}],
+        "lab": [{"source_url": "v2:a", "title": "<b>粗</b>", "summary": "s"}]})
+    assert "<script>" not in html
+    assert "&lt;script&gt;" in html
+

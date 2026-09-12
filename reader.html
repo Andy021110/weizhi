@@ -264,6 +264,21 @@
     border-left: 3px solid var(--primary); padding-left: 9px;
   }
 
+  /* 发现层弹层 */
+  .dis-head { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 2px; }
+  .dis-note { font-size: 11.5px; color: var(--text-3); margin-bottom: 2px; }
+  .dis-card {
+    border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px;
+    margin-top: 9px; cursor: pointer; background: var(--card);
+  }
+  .dis-card:active { background: var(--bg); }
+  .dis-title { font-weight: 700; font-size: 14px; line-height: 1.45; color: var(--text); }
+  .dis-why { font-size: 12.5px; color: var(--text-2); margin-top: 4px; line-height: 1.6; }
+  .dis-go { font-size: 12px; color: var(--accent); margin-top: 6px; }
+  .dis-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 7px; }
+  .dis-tag { font-size: 11px; color: var(--text-3); background: var(--bg); border-radius: 6px; padding: 2px 7px; }
+  .dis-empty { font-size: 12.5px; color: var(--text-3); padding: 10px 0; }
+
   .core-point { display: flex; gap: 10px; margin-bottom: 12px; }
   .core-point:last-child { margin-bottom: 0; }
   .core-num {
@@ -605,6 +620,7 @@
       <button class="create-btn" id="createBtn">+ 新建知识</button>
       <button class="plan-btn" id="planBtn">系统学习 · 建计划</button>
       <div class="entry-row">
+        <button class="entry-btn" id="discoverBtn">发现</button>
         <button class="entry-btn" id="favBtn">收藏</button>
         <button class="entry-btn" id="statsBtn">统计</button>
         <button class="entry-btn" id="ledgerBtn">阅读待学</button>
@@ -652,6 +668,16 @@
       <div id="notifList"></div>
       <button class="create-cancel" id="notifReadAll" style="margin-top:12px">全部标为已读</button>
       <button class="create-cancel" id="notifClose" style="margin-top:6px">关闭</button>
+    </div>
+  </div>
+
+  <!-- 发现层弹层：放两样「不该推送、但值得看」的东西 -->
+  <div class="create-overlay" id="discoverOverlay" style="display:none">
+    <div class="create-box" style="max-width:520px;max-height:82vh;overflow-y:auto">
+      <div class="create-box-title">发现</div>
+      <div class="create-hint">内容发现是自己来逛的，不是被推送的</div>
+      <div id="discoverBody"></div>
+      <button class="create-cancel" id="discoverClose" style="margin-top:12px">关闭</button>
     </div>
   </div>
 
@@ -1348,6 +1374,9 @@
     state.view = 'list';
     state.subView = null;
     resetQuiz();
+    // 从发现层进来的卡不在列表上下文里：返回时要还原原列表，
+    // 否则「返回」会落在一张卡的列表上，用户找不到刚才那份列表了。
+    if (state.pickReturn) { state.cards = state.pickReturn; state.pickReturn = null; }
     renderView();
     renderList();
   }
@@ -2526,6 +2555,88 @@
     }).catch(function () {});
   }
 
+  // ---------- 发现层（Top 3 荐读 + v2 实验卡）----------
+  // 这两块内容有一个共同点：都不该推送打扰用户，但也不该消失。
+  // 「不推送」的正确做法是给用户一个主动来逛的地方，而不是把数据写进
+  // 数据库就算完——那样能力事实上是不存在的。
+  function showDiscover() {
+    $('discoverOverlay').style.display = 'flex';
+    loadDiscover();
+  }
+
+  function loadDiscover() {
+    $('discoverBody').innerHTML = '<div class="dis-empty" style="text-align:center">加载中…</div>';
+    fetchJSON('/api/discover').then(function (d) {
+      $('discoverBody').innerHTML = renderDiscover(d || {});
+      bindDiscoverCards();
+    }).catch(function () {
+      $('discoverBody').innerHTML = '<div class="dis-empty">加载失败</div>';
+    });
+  }
+
+  function renderDiscover(d) {
+    var picks = d.picks || [];
+    var lab = d.lab || [];
+    var html = '';
+
+    // Agent 挑出来的和「今天有什么」要分开说：前者是推荐（带理由），
+    // 后者只是如实列出。用同一句标题会把两种可信度混成一种。
+    var label = (picks.length && picks[0].from === 'today') ? '今天的新卡' : '为你挑的';
+    html += '<div class="dis-head">' + label + '</div>';
+    if (!picks.length) {
+      html += '<div class="dis-empty">今天没有单独值得推荐的卡</div>';
+    } else {
+      html += picks.map(function (p) {
+        return '<div class="dis-card" data-url="' + escapeHtml(p.source_url) + '">' +
+          '<div class="dis-title">' + escapeHtml(p.title) + '</div>' +
+          (p.why ? '<div class="dis-why">' + escapeHtml(p.why) + '</div>' : '') +
+          '<div class="dis-go">去读 ›</div>' +
+        '</div>';
+      }).join('');
+    }
+
+    html += '<div class="dis-head" style="margin-top:16px">v2 实验卡</div>';
+    html += '<div class="dis-note">新流程生成，尚未接管推送</div>';
+    if (!lab.length) {
+      html += '<div class="dis-empty">还没有 v2 产出的卡</div>';
+    } else {
+      html += lab.map(function (c) {
+        var tags = [];
+        if (c.date) tags.push('<span class="dis-tag">' + escapeHtml(c.date) + '</span>');
+        if (c.figures) tags.push('<span class="dis-tag">配图 ' + c.figures + '</span>');
+        if (c.questions) tags.push('<span class="dis-tag">题 ' + c.questions + '</span>');
+        return '<div class="dis-card" data-url="' + escapeHtml(c.source_url) + '">' +
+          '<div class="dis-title">' + escapeHtml(c.title) + '</div>' +
+          (c.summary ? '<div class="dis-why">' + escapeHtml(c.summary) + '</div>' : '') +
+          '<div class="dis-meta">' + tags.join('') + '</div>' +
+        '</div>';
+      }).join('');
+    }
+    return html;
+  }
+
+  function bindDiscoverCards() {
+    document.querySelectorAll('#discoverBody .dis-card').forEach(function (el) {
+      el.addEventListener('click', function () { openDiscoverCard(el.dataset.url); });
+    });
+  }
+
+  // 从发现层打开的一张卡：不在当前列表上下文里，所以单独走单卡接口。
+  // 返回时把列表还原回去，否则「返回」会停在这张卡唯一的列表里。
+  function openDiscoverCard(src) {
+    if (!src) return;
+    fetchJSON('/api/card?source_url=' + encodeURIComponent(src)).then(function (d) {
+      if (!d.card) { alert('这张卡已经不在库里了'); return; }
+      if (!state.pickReturn) state.pickReturn = state.cards;
+      state.cards = [d.card];
+      state.detailIndex = 0;
+      $('discoverOverlay').style.display = 'none';
+      resetQuiz();
+      renderDetail();
+      renderView();
+    }).catch(function () {});
+  }
+
   // ---------- 阅读待学（从阅读来的概念）----------
   function showLedger() {
     $('ledgerOverlay').style.display = 'flex';
@@ -3088,6 +3199,8 @@
   });
   $('favBtn').addEventListener('click', showFavorites);
   $('statsBtn').addEventListener('click', showStats);
+  $('discoverBtn').addEventListener('click', showDiscover);
+  $('discoverClose').addEventListener('click', function () { $('discoverOverlay').style.display = 'none'; });
   $('ledgerBtn').addEventListener('click', showLedger);
   $('ledgerClose').addEventListener('click', function () { $('ledgerOverlay').style.display = 'none'; });
   $('qcBtn').addEventListener('click', openQcReport);

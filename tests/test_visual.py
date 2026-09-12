@@ -156,3 +156,59 @@ def test_attach_and_read_back(tmp_db):
 def test_default_min_figures_is_zero():
     """「每卡至少两张图」是实验配置不是产品规则——默认允许不出图。"""
     assert visual.MIN_FIGURES == 0
+
+
+# ---------- 逐张取舍：一张坏图不该让整卡失去全部配图 ----------
+
+def _bad_coordinate():
+    """一张忘了给真实数值点的坐标图。"""
+    return dict(GOOD_FIG, kind="coordinate", plot={"nodes": ["v1", "v2"]})
+
+
+def test_plan_visuals_drops_only_the_bad_figure(tmp_db):
+    """回归：模型给了三张图，第三张坐标图没给数值点，前两张合格的被一起丢掉，
+    卡片以「配图 0」入库。丢一张和丢三张不成比例。"""
+    figs = visual.plan_visuals(
+        _provider([GOOD_FIG, dict(GOOD_FIG), _bad_coordinate()]),
+        {"objective": "x", "title": "t"})
+    assert len(figs) == 2
+    assert all(f["kind"] == "flow" for f in figs)
+    assert [f["id"] for f in figs] == ["fig1", "fig2"]
+
+
+def test_plan_visuals_all_bad_returns_empty(tmp_db):
+    """全都不合格 = 这张卡没有配图。这是允许的结果，不是崩溃。"""
+    figs = visual.plan_visuals(_provider([_bad_coordinate()]),
+                               {"objective": "x", "title": "t"})
+    assert figs == []
+
+
+def test_plan_visuals_still_fails_on_broken_shape(tmp_db):
+    """宽校验只放宽局部问题：整体结构坏了（figures 不是数组）仍要失败，
+    否则模型输出跑偏会被当成「今天不用配图」。"""
+    with pytest.raises(Exception):
+        visual.plan_visuals(_provider("不是数组"), {"objective": "x", "title": "t"})
+
+
+def test_plan_visuals_still_caps_figure_count(tmp_db):
+    with pytest.raises(Exception):
+        visual.plan_visuals(_provider([dict(GOOD_FIG)] * (visual.MAX_FIGURES + 1)),
+                            {"objective": "x", "title": "t"})
+
+
+def test_shape_check_only_cares_about_structure():
+    assert visual.validate_visual_plan_shape({"figures": []}) == []
+    assert visual.validate_visual_plan_shape({"figures": [GOOD_FIG]}) == []
+    # 局部内容问题不该在这里报出来——那是逐张过滤的职责
+    assert visual.validate_visual_plan_shape({"figures": [_bad_coordinate()]}) == []
+    assert visual.validate_visual_plan_shape({"figures": "不是数组"})
+    assert visual.validate_visual_plan_shape({"figures": [GOOD_FIG] * (visual.MAX_FIGURES + 1)})
+
+
+def test_figure_errors_agrees_with_whole_plan_check():
+    """两套判据不能漂移：单图检查报的问题，整批检查必须同样报出来。"""
+    for fig in (GOOD_FIG, _bad_coordinate(), dict(GOOD_FIG, kind="pie"),
+                dict(GOOD_FIG, proposition="短"), dict(GOOD_FIG, alt="")):
+        assert bool(visual.figure_errors(fig, 0)) == bool(
+            visual.validate_visual_plan({"figures": [fig]})), fig
+

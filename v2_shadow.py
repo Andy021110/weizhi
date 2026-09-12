@@ -75,8 +75,34 @@ def _provider(cfg):
     return DeepSeekProvider(api_key=key, timeout=180)
 
 
+# 每个信向往回看多少条候选。取 10 是因为 RSS 前几条常常几天不变，
+# 而「跳过已出过卡的」之后需要足够的候选才能找到新文章。
+LOOKBACK = 10
+
+
+def already_made(title, url):
+    """这篇材料是否已经出过卡（含影子卡）。
+
+    **为什么必须有这个判断**：RSS 的置顶文章几天不变，而影子任务每天只取
+    「最新一篇」。没有这段，第二天起必然撞上 v1 的「重复卡」门禁——
+    表现是每天都失败，但失败原因看着像内容问题，实际是选材没有轮转。
+    真实后果：影子链路只跑得动一次，之后就再也产不出可评审的 v2 卡。
+
+    **判据不能是 `stored_key(url, title)`**：入库键是
+    `<url>#v2:<sha1(url|卡片标题)>`，混的是**生成之后的标题**，
+    而这里手上只有 RSS 的原始标题——两者对不上，算了也白算。
+    所以按 URL 前缀查卡片库（见 `db.has_bridged_card_for`）。
+    """
+    if not url:
+        return False
+    try:
+        return db.has_bridged_card_for(url)
+    except Exception:  # noqa: BLE001 - 判重失败不该阻断生产
+        return False
+
+
 def fetch_materials(cfg, want=1, min_chars=1200):
-    """从已配置信源取最新的、能抓全正文的几篇。
+    """从已配置信源取最新的、能抓全正文的、**还没出过卡的**几篇。
 
     只取不存——入库由 evidence.ingest_source 负责，这里不重复落盘逻辑。
     """
@@ -93,9 +119,12 @@ def fetch_materials(cfg, want=1, min_chars=1200):
         except Exception as exc:  # noqa: BLE001
             log("信源解析失败 %s: %s" % (src.get("name"), exc))
             continue
-        for entry in (feed.entries or [])[:5]:
+        for entry in (feed.entries or [])[:LOOKBACK]:
             if len(out) >= want:
                 break
+            if already_made(getattr(entry, "title", ""), entry.link):
+                log("跳过已出过卡的材料：%s" % (getattr(entry, "title", "") or "")[:40])
+                continue
             try:
                 raw = trafilatura.fetch_url(entry.link)
                 text = trafilatura.extract(raw, include_comments=False) if raw else None

@@ -104,6 +104,63 @@ def validate_visual_plan(data):
     return errs
 
 
+def figure_errors(fig, i):
+    """单张图的完整性问题清单。返回空列表 = 这张图合格。
+
+    抽出来是为了让「逐张取舍」和「整批校验」共用同一套判据——两处各写
+    一份的话，迟早一边改严一边没改，而差异只会表现为「有的图能过有的
+    图不能过」这种最难查的现象。
+    """
+    errs = []
+    if not isinstance(fig, dict):
+        return ["figures[%d] 应为对象" % i]
+    kind = fig.get("kind")
+    if kind not in ALL_KINDS:
+        errs.append("figures[%d].kind=%r 不在可用图形语法里" % (i, kind))
+    if len((fig.get("proposition") or "").strip()) < 8:
+        errs.append("figures[%d].proposition 缺失或太空泛" % i)
+    if len((fig.get("reading") or "").strip()) < 6:
+        errs.append("figures[%d].reading 缺失" % i)
+    if not (fig.get("alt") or "").strip():
+        errs.append("figures[%d].alt 缺失" % i)
+    plot = fig.get("plot")
+    if kind != "none" and not isinstance(plot, dict):
+        errs.append("figures[%d].plot 应为对象" % i)
+    elif isinstance(plot, dict):
+        if plot.get("nodes") is not None and not isinstance(plot.get("nodes"), list):
+            errs.append("figures[%d].plot.nodes 应为数组" % i)
+        if kind == "coordinate":
+            pts = plot.get("points")
+            if not isinstance(pts, list) or len(pts) < 2:
+                errs.append("figures[%d] 是坐标图但没给 plot.points" % i)
+            else:
+                for p in pts:
+                    if not (isinstance(p, (list, tuple)) and len(p) == 2
+                            and all(isinstance(v, (int, float)) for v in p)):
+                        errs.append("figures[%d].plot.points 每项应为 [x, y] 数值对" % i)
+                        break
+    return errs
+
+
+def validate_visual_plan_shape(data):
+    """宽校验：只看整体结构，给 provider 重试用。
+
+    **为什么要和 `validate_visual_plan` 分开**：那份是「一张不合格就整批
+    重试、重试耗尽整批作废」——那是给「模型根本没按格式输出」准备的。
+    但对「三张图里第三张忘了给数值点」这种局部问题就过重了，真实代价是
+    **整张卡一张图都没有**（配图是 v2 的主要卖点之一）。
+    所以局部问题交给 `plan_visuals` 逐张过滤，这里只拦「压根不是方案」。
+    """
+    if not isinstance(data, dict):
+        return ["视觉方案必须是 JSON 对象"]
+    figures = data.get("figures")
+    if not isinstance(figures, list):
+        return ["figures 应为数组（不需要配图时给空数组）"]
+    if len(figures) > MAX_FIGURES:
+        return ["figures %d 张 >%d" % (len(figures), MAX_FIGURES)]
+    return []
+
+
 def check_visual_quality(figures):
     """视觉质量门禁，返回 [(标签, 详情)]。"""
     issues = []
@@ -357,11 +414,26 @@ def build_inputs(draft, claims, evidence_block=None):
 
 
 def plan_visuals(provider, draft, claims=None, evidence_block=None):
-    """规划配图。没有理解价值时返回空列表——这是允许的，不是失败。"""
+    """规划配图。没有理解价值时返回空列表——这是允许的，不是失败。
+
+    两级校验：
+    - 整体结构交给 provider 重试（`validate_visual_plan_shape`）；
+    - **逐张质量在本地过滤**（`figure_errors`）。
+
+    为什么不是一股脑交给 provider 重试：那张图不合格就整批重试、重试耗尽
+    整批作废，真实代价是**整张卡一张图都没有**。真实踩过——模型给了三张图，
+    第三张坐标图忘了给数值点，前两张合格的也被一起丢掉，卡片以「配图 0」
+    入库。丢一张和丢三张不成比例，所以各丢各的。
+    """
     data = provider.generate_json(
-        TASK, validate_visual_plan, build_inputs(draft, claims, evidence_block))
+        TASK, validate_visual_plan_shape, build_inputs(draft, claims, evidence_block))
     figures = []
     for i, fig in enumerate(data.get("figures") or []):
+        errs = figure_errors(fig, i)
+        if errs:
+            # 不静默：丢掉的是图，但要知道丢了几张、为什么丢
+            print("配图跳过 figures[%d]：%s" % (i, "；".join(errs)))
+            continue
         item = dict(fig)
         item["id"] = "fig%d" % (i + 1)
         item["render_mode"] = "deterministic" if item.get("kind") in DETERMINISTIC_KINDS else "image"

@@ -316,6 +316,57 @@ def is_shadow_card(card):
                 or (card.get("_meta") or {}).get("shadow"))
 
 
+def shadow_cards(limit=5):
+    """最近的影子卡（v2 产出，尚未接管推送）。
+
+    **为什么要单独一个查询**：影子卡对推送、质检、自动修复都不可见，这是
+    刻意的隔离；但「不可见」不能变成「没人看得见」——评审需要能随时翻到
+    v2 最新产出，而不是记得它落在哪个历史日期里。发现层用它。
+
+    实现上先按 id 倒序扫一批再用 `is_shadow_card` 过滤，而不是在 SQL 里
+    对 extra 做 LIKE：`shadow` 是嵌在两层 JSON 里的布尔值，字符串匹配会把
+    `"shadow": false` 也算命中，也会被转义差异骗过去。
+    """
+    if limit <= 0:
+        return []
+    conn = _conn()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM cards ORDER BY id DESC LIMIT ?", (max(limit * 8, 40),)
+        ).fetchall()
+    finally:
+        conn.close()
+    out = [c for c in (_row_to_card(r) for r in rows) if is_shadow_card(c)]
+    return out[:limit]
+
+
+def _escape_like(s):
+    """把 LIKE 的通配符转义掉。URL 里 % 很常见（percent-encoding），
+    不转义会把「这一篇」匹配成「一大批」。"""
+    return (s or "").replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def has_bridged_card_for(url):
+    """这个材料 URL 是否已经桥接过卡（含影子卡）。
+
+    桥接卡的 source_url 形如 `<材料url>#v2:<哈希>`，而哈希里混的是
+    **生成之后的卡片标题**——也就是说，拿 RSS 上的原始标题根本反推不出
+    入库键，`stored_key()` 在这里用不上。所以只能按 URL 前缀查：
+    v1 自己生成的卡用的是裸 URL，不会带 `#v2:` 后缀，不会误判。
+    """
+    if not url:
+        return False
+    conn = _conn()
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM cards WHERE source_url LIKE ? ESCAPE '\\' LIMIT 1",
+            (_escape_like(url) + "#v2:%",),
+        ).fetchone()
+    finally:
+        conn.close()
+    return row is not None
+
+
 def save_card(card, date=None):
     """插入卡片，source_url 冲突则忽略（去重）。返回是否插入成功。
 
