@@ -39,9 +39,53 @@ def req(path, data=None):
     return json.loads(raw) if raw.strip() else None
 
 
+SEED_CARD = {
+    "source_url": "https://example.com/h#v2:e2e",
+    "title": "端到端验证卡：循环的四个阶段",
+    "summary": "导语", "body": "正文" * 200, "template": "t2_reading",
+    "think_question": "迁移任务", "think_answer": "答案" * 80,
+    "quiz": [{"question": "即时题", "options": ["A", "B"], "answer": 1,
+              "explanation": "即时解析", "error_reason": "即时误解",
+              "layer": "immediate", "objective": "能说出四阶段"}],
+    "review_quiz": [{"question": "回忆题", "options": ["C", "D"], "answer": 0,
+                     "explanation": "回忆解析", "error_reason": "把循环和流水线混为一谈",
+                     "layer": "day1", "objective": "能复述四阶段"},
+                    {"question": "迁移题", "options": ["E", "F"], "answer": 1,
+                     "explanation": "迁移解析", "error_reason": "漏掉了边界条件",
+                     "layer": "day7", "objective": "能迁移到新场景"}],
+    "open_question": {"question": "简答题", "reference_answer": "标准答案正文",
+                      "grading_points": ["要点一", "要点二"]},
+    "core_points": ["点1", "点2"], "memory_state": "learning",
+    "_meta": {"template": "t2_reading"},
+    "_bridge": {"origin": "v2", "shadow": True, "goal_key": "g-e2e",
+                "milestone": "m1", "draft_id": 1},
+}
+
+
+def _seed(db):
+    """准备好这张卡：本脚本要能自己跑起来，不该依赖手工播种。
+
+    每次都重置它的复习状态，这样脚本可重复执行——否则上一次跑完把
+    next_review_at 推到未来，下一次队列就是空的。
+    """
+    from datetime import datetime
+    today = datetime.now().strftime("%Y-%m-%d")
+    card = dict(SEED_CARD, next_review_at=today)
+    conn = db._conn()
+    try:
+        conn.execute("DELETE FROM cards WHERE source_url = ?", (card["source_url"],))
+        conn.commit()
+    finally:
+        conn.close()
+    db.save_card(card, date=today)
+
+
 def main():
     sys.path.insert(0, _ROOT)
     import db
+
+    db.init_db()
+    _seed(db)
 
     print("=== 1. 复习队列：答案不能下发 ===")
     q = req("/api/review/queue")

@@ -63,6 +63,24 @@ def load_config():
     return {}
 
 
+def _auto_template(api_key, topic, fallback="t2_reading"):
+    """按主题自动判断内容构成。
+
+    范围决策把「六种固定卡片类型」从用户界面下线了——它们不是六种学习目标，
+    只是内容表现形式。所以用户不再选类型，由服务端判断；识别失败就用兜底值，
+    不能让一次分类失败把建卡整个卡住。
+    """
+    topic = (topic or "").strip()
+    if not topic or len(topic) < 2:
+        return fallback
+    try:
+        result = classify_topic(api_key, topic)
+    except Exception:  # noqa: BLE001
+        traceback.print_exc()
+        return fallback
+    return result.get("template") or fallback
+
+
 def _int_arg(value, default=-1):
     """把请求里的整数字段转成 int，缺省或非法时给 default。
 
@@ -1088,11 +1106,15 @@ class ReaderHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/create":
+            api_key = load_api_key()
+            # 用户不再选类型：给了就用（内部调用），没给就按主题自己判断
+            template = req.get("template") or _auto_template(
+                api_key, req.get("topic") or "")
             result = create_card(
-                load_api_key(),
+                api_key,
                 topic=req.get("topic"),
                 url=req.get("url"),
-                template=req.get("template", "t2_reading"),
+                template=template,
             )
             self._send_json(result)
             return

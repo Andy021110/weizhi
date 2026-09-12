@@ -619,15 +619,9 @@
   <div class="create-overlay" id="createOverlay" style="display:none">
     <div class="create-box">
       <div class="create-box-title">新建知识</div>
-      <div class="create-hint">选类型，输入主题或链接</div>
-      <div class="template-row" id="templateRow">
-        <button class="tpl-btn active" data-tpl="t2_reading">精读</button>
-        <button class="tpl-btn" data-tpl="t1_vocab">词汇</button>
-        <button class="tpl-btn" data-tpl="t3_math">数学</button>
-        <button class="tpl-btn" data-tpl="t4_trivia">通识</button>
-        <button class="tpl-btn" data-tpl="t5_skill">技能</button>
-        <button class="tpl-btn" data-tpl="t6_code">代码</button>
-      </div>
+      <!-- 不再让用户选类型：六种固定类型不是六种学习目标，只是内容表现形式。
+           系统按主题自动决定内容构成（概念/公式/代码/案例/对比/练习）。 -->
+      <div class="create-hint">输入主题或链接，系统会自己判断该讲什么、怎么讲</div>
       <textarea id="createInput" placeholder="例如：量子计算的原理，或 https://..."></textarea>
       <button class="create-submit" id="createSubmit">生成卡片</button>
       <div class="create-msg" id="createMsg"></div>
@@ -682,16 +676,9 @@
   <div class="create-overlay" id="planOverlay" style="display:none">
     <div class="create-box">
       <div class="create-box-title">系统学习计划</div>
-      <div class="create-hint">AI 自动判断类型，或手动指定 + 输入主题</div>
-      <div class="template-row" id="planTemplateRow">
-        <button class="tpl-btn active" data-tpl="__auto__">AI 自动</button>
-        <button class="tpl-btn" data-tpl="t4_trivia">通识</button>
-        <button class="tpl-btn" data-tpl="t1_vocab">词汇</button>
-        <button class="tpl-btn" data-tpl="t2_reading">精读</button>
-        <button class="tpl-btn" data-tpl="t3_math">数学</button>
-        <button class="tpl-btn" data-tpl="t5_skill">技能</button>
-        <button class="tpl-btn" data-tpl="t6_code">代码</button>
-      </div>
+      <!-- 类型选择已下线（范围决策）：只留主题 + 规模 + 节奏这三个用户真正
+           该决定的维度。内容构成由系统按主题自动判断。 -->
+      <div class="create-hint">输入想学的主题</div>
       <div class="create-hint" style="margin-top:8px">规模（本次学多少）</div>
       <div class="template-row" id="planScaleRow">
         <button class="tpl-btn" data-scale="20">轻量 · 20 卡</button>
@@ -1034,81 +1021,139 @@
   }
 
   // 按模板类型渲染卡片正文内容
-  function renderCardContent(c) {
-    var tpl = (c._meta && c._meta.template) || 't2_reading';
-    var html = '';
+  // ---------- 内容块渲染 ----------
+  // 按「卡片里有什么」渲染，而不是按类型标签分支。
+  //
+  // 范围决策：六种固定卡片类型不是六种学习目标，只是内容表现形式；
+  // 系统应按学习目标自动组合内容块（概念解释/公式推导/代码追踪/案例分析/
+  // 对比判断/操作练习）。一张 Transformer 卡可以同时含概念、数学和代码，
+  // 不需要被强行归入某一种类型。所以这里**没有 tpl 分支**，
+  // 只有「有哪些块」和「按什么顺序读」。
+  //
+  // 顺序按阅读流排：先勾兴趣 → 给结论 → 讲直觉 → 展开正文 → 代码/例子/步骤
+  // → 提醒与边界 → 动手。空的块自然跳过。
+  var CARD_BLOCKS = [
+    // word / words 是「这张卡在讲什么」，排最前。放在末尾会让词汇卡先出
+    // 例句、最后才出单词——读起来是反的。
+    { key: 'word',           title: '词汇详解',       kind: 'word' },
+    { key: 'words',          title: '',               kind: 'words' },
+    { key: 'hook',           title: '你知道吗',       kind: 'think', label: '你知道吗' },
+    { key: 'summary',        title: '一句话核心',     kind: 'think' },
+    { key: 'intuition',      title: '直觉理解',       kind: 'prose' },
+    { key: 'body',           title: '正文精读',       kind: 'body' },
+    { key: 'pseudocode',     title: '核心逻辑（伪代码）', kind: 'code' },
+    { key: 'examples',       title: '例句',           kind: 'pairs' },
+    { key: 'example',        title: '走一遍例子',     kind: 'prose' },
+    { key: 'steps',          title: '步骤',           kind: 'steps' },
+    { key: 'key_steps',      title: '关键步骤',       kind: 'list' },
+    { key: 'why',            title: '为什么这么设计', kind: 'think' },
+    { key: 'bad_example',    title: '别这么做',       kind: 'think' },
+    { key: 'good_example',   title: '应该这么做',     kind: 'prose' },
+    { key: 'tip',            title: '进阶技巧',       kind: 'think' },
+    { key: 'common_mistake', title: '易错点',         kind: 'think' },
+    { key: 'pitfalls',       title: '常见坑',         kind: 'think' },
+    { key: 'fun_facts',      title: '有趣细节',       kind: 'list' },
+    { key: 'share_line',     title: '',               kind: 'think' },
+    { key: 'try_it',         title: '今天就试',       kind: 'prose' },
+    { key: 'etymology',      title: '词源拆解',       kind: 'prose' },
+  ];
 
-    if (tpl === 't1_vocab') {
-      if (c.word) {
-        html += '<div class="section"><div class="section-title">词汇详解</div><div class="body-text"><p><strong>' + escapeHtml(c.word) + '</strong> ' + escapeHtml(c.phonetic || '') + ' <span class="badge badge-cat">' + escapeHtml(c.pos_label || c.pos || '') + '</span></p><p>' + escapeHtml(c.definition_cn || '') + '</p></div></div>';
-        if (c.etymology) html += '<div class="section"><div class="section-title">词源拆解</div><div class="body-text"><p>' + escapeHtml(c.etymology) + '</p></div></div>';
-        var exs = c.examples || [];
-        if (exs.length) {
-          html += '<div class="section"><div class="section-title">例句</div>';
-          html += exs.map(function (e) { return '<div class="core-point"><div class="core-text"><strong>' + escapeHtml(e.en) + '</strong><br>' + escapeHtml(e.cn) + '</div></div>'; }).join('');
-          html += '</div>';
-        }
-        if (c.common_mistake) html += '<div class="section"><div class="section-title">易错点</div><div class="think-box">' + escapeHtml(c.common_mistake) + '</div></div>';
-      } else if (c.words && c.words.length) {
-        html += '<div class="section"><div class="section-title">词库 · ' + c.words.length + ' 词</div>';
-        html += c.words.map(function (w) {
-          var ex = w.example || {};
-          return '<div class="core-point"><div class="core-text"><strong>' + escapeHtml(w.word) + '</strong> ' + escapeHtml(w.phonetic || '') + ' <span style="color:var(--text-3)">' + escapeHtml(w.pos || '') + '</span><br>' + escapeHtml(w.definition_cn || '') + '<br><span style="color:var(--text-3);font-size:12px">' + escapeHtml(ex.en || '') + ' ' + escapeHtml(ex.cn || '') + '</span>' + (w.mistake ? '<br><span style="color:#b06a49;font-size:12px">' + escapeHtml(w.mistake) + '</span>' : '') + '</div></div>';
-        }).join('');
-        html += '</div>';
-      }
-    } else if (tpl === 't3_math') {
-      html += '<div class="section"><div class="section-title">直觉理解</div><div class="body-text"><p>' + escapeHtml(c.intuition || '') + '</p></div></div>';
-      if (c.example) html += '<div class="section"><div class="section-title">小例子</div><div class="body-text"><p>' + escapeHtml(c.example) + '</p></div></div>';
-      if (c.try_it) html += '<div class="section"><div class="section-title">自己试试</div><div class="think-box">' + escapeHtml(c.try_it) + '</div></div>';
-    } else if (tpl === 't4_trivia') {
-      if (c.hook) html += '<div class="section"><div class="think-box"><span class="think-label">你知道吗</span>' + escapeHtml(c.hook) + '</div></div>';
-      if (c.body) html += '<div class="section"><div class="section-title">正文</div><div class="body-text">' + renderBody(c.body) + '</div></div>';
-      var facts = c.fun_facts || [];
-      if (facts.length) {
-        html += '<div class="section"><div class="section-title">有趣细节</div>';
-        html += facts.map(function (f, i) { return '<div class="core-point"><div class="core-num">' + (i + 1) + '</div><div class="core-text">' + escapeHtml(f) + '</div></div>'; }).join('');
-        html += '</div>';
-      }
-      if (c.share_line) html += '<div class="section"><div class="think-box">' + escapeHtml(c.share_line) + '</div></div>';
-    } else if (tpl === 't5_skill') {
-      var steps = c.steps || [];
-      if (steps.length) {
-        html += '<div class="section"><div class="section-title">步骤</div>';
-        html += steps.map(function (s, i) { return '<div class="core-point"><div class="core-num">' + (i + 1) + '</div><div class="core-text"><strong>' + escapeHtml(s.step) + '</strong><br>' + escapeHtml(s.detail || '') + '</div></div>'; }).join('');
-        html += '</div>';
-      }
-      if (c.bad_example) html += '<div class="section"><div class="section-title">别这么做</div><div class="think-box">' + escapeHtml(c.bad_example) + '</div></div>';
-      if (c.good_example) html += '<div class="section"><div class="section-title">应该这么做</div><div class="body-text"><p>' + escapeHtml(c.good_example) + '</p></div></div>';
-      if (c.tip) html += '<div class="section"><div class="section-title">进阶技巧</div><div class="think-box">' + escapeHtml(c.tip) + '</div></div>';
-      if (c.try_it) html += '<div class="section"><div class="section-title">今天就试</div><div class="body-text"><p>' + escapeHtml(c.try_it) + '</p></div></div>';
-    } else if (tpl === 't6_code') {
-      if (c.summary) html += '<div class="section"><div class="section-title">一句话核心</div><div class="think-box">' + escapeHtml(c.summary) + '</div></div>';
-      if (c.intuition) html += '<div class="section"><div class="section-title">直觉理解</div><div class="body-text"><p>' + escapeHtml(c.intuition) + '</p></div></div>';
-      if (c.pseudocode) html += '<div class="section"><div class="section-title">核心逻辑（伪代码）</div><pre class="code-block">' + escapeHtml(c.pseudocode) + '</pre></div>';
-      var ksteps = c.key_steps || [];
-      if (ksteps.length) {
-        html += '<div class="section"><div class="section-title">关键步骤</div>';
-        html += ksteps.map(function (s, i) { return '<div class="core-point"><div class="core-num">' + (i + 1) + '</div><div class="core-text">' + escapeHtml(s) + '</div></div>'; }).join('');
-        html += '</div>';
-      }
-      if (c.why) html += '<div class="section"><div class="section-title">为什么这么设计</div><div class="think-box">' + escapeHtml(c.why) + '</div></div>';
-      if (c.example) html += '<div class="section"><div class="section-title">例子走一遍</div><div class="body-text"><p>' + escapeHtml(c.example) + '</p></div></div>';
-      if (c.pitfalls) html += '<div class="section"><div class="section-title">常见坑</div><div class="think-box">' + escapeHtml(c.pitfalls) + '</div></div>';
-    } else {
-      html += '<div class="section"><div class="section-title">正文精读</div><div class="body-text">' + renderBody(c.body) + '</div></div>';
-      html += renderFigures(c.figures);
-      var points = c.core_points || [];
-      if (points.length) {
-        html += '<div class="section"><div class="section-title">核心观点</div>';
-        html += points.map(function (p, i) { return '<div class="core-point"><div class="core-num">' + (i + 1) + '</div><div class="core-text">' + escapeHtml(p) + '</div></div>'; }).join('');
-        html += '</div>';
-      }
+  function _section(title, inner) {
+    if (!title) return '<div class="section">' + inner + '</div>';
+    return '<div class="section"><div class="section-title">' + title + '</div>' + inner + '</div>';
+  }
+
+  function _numbered(items, render) {
+    return items.map(function (x, i) {
+      return '<div class="core-point"><div class="core-num">' + (i + 1) + '</div><div class="core-text">' +
+        render(x) + '</div></div>';
+    }).join('');
+  }
+
+  function renderCardBlock(spec, value, c) {
+    var kind = spec.kind;
+    if (kind === 'body') {
+      return _section(spec.title, '<div class="body-text">' + renderBody(value) + '</div>');
     }
-    // 思考题（5 类通用，点按钮看 AI 回答）
+    if (kind === 'prose') {
+      return _section(spec.title, '<div class="body-text"><p>' + escapeHtml(value) + '</p></div>');
+    }
+    if (kind === 'code') {
+      return _section(spec.title, '<pre class="code-block">' + escapeHtml(value) + '</pre>');
+    }
+    if (kind === 'think') {
+      var inner = spec.label
+        ? '<div class="think-box"><span class="think-label">' + spec.label + '</span>' + escapeHtml(value) + '</div>'
+        : '<div class="think-box">' + escapeHtml(value) + '</div>';
+      return _section(spec.title, inner);
+    }
+    if (kind === 'list') {
+      return _section(spec.title, _numbered(value, function (x) { return escapeHtml(x); }));
+    }
+    if (kind === 'steps') {
+      return _section(spec.title, _numbered(value, function (x) {
+        return '<strong>' + escapeHtml(x.step) + '</strong><br>' + escapeHtml(x.detail || '');
+      }));
+    }
+    if (kind === 'pairs') {
+      return _section(spec.title, value.map(function (e) {
+        return '<div class="core-point"><div class="core-text"><strong>' + escapeHtml(e.en) +
+          '</strong><br>' + escapeHtml(e.cn) + '</div></div>';
+      }).join(''));
+    }
+    if (kind === 'word') {
+      // 单词是「词汇卡」的核心事实，不是正文的一部分
+      return _section(spec.title, '<div class="body-text"><p><strong>' + escapeHtml(c.word) + '</strong> ' +
+        escapeHtml(c.phonetic || '') + ' <span class="badge badge-cat">' +
+        escapeHtml(c.pos_label || c.pos || '') + '</span></p><p>' +
+        escapeHtml(c.definition_cn || '') + '</p></div>');
+    }
+    if (kind === 'words') {
+      return _section('词库 · ' + value.length + ' 词', value.map(function (w) {
+        var ex = w.example || {};
+        return '<div class="core-point"><div class="core-text"><strong>' + escapeHtml(w.word) +
+          '</strong> ' + escapeHtml(w.phonetic || '') +
+          ' <span style="color:var(--text-3)">' + escapeHtml(w.pos || '') + '</span><br>' +
+          escapeHtml(w.definition_cn || '') +
+          '<br><span style="color:var(--text-3);font-size:12px">' +
+          escapeHtml(ex.en || '') + ' ' + escapeHtml(ex.cn || '') + '</span>' +
+          (w.mistake ? '<br><span style="color:#b06a49;font-size:12px">' +
+                       escapeHtml(w.mistake) + '</span>' : '') + '</div></div>';
+      }).join(''));
+    }
+    return '';
+  }
+
+  // 列表型块的字段必须有内容才渲染（空数组不该出一个空标题）
+  var LIST_KINDS = { list: 1, steps: 1, pairs: 1, words: 1 };
+
+  function renderCardContent(c) {
+    var html = '';
+    for (var i = 0; i < CARD_BLOCKS.length; i++) {
+      var spec = CARD_BLOCKS[i];
+      var v = c[spec.key];
+      if (v === undefined || v === null || v === '') continue;
+      if (LIST_KINDS[spec.kind]) {
+        if (!v.length) continue;
+      } else if (typeof v !== 'string') {
+        continue;
+      }
+      html += renderCardBlock(spec, v, c);
+    }
+
+    var points = c.core_points || [];
+    if (points.length) {
+      html += _section('核心观点', _numbered(points, function (p) { return escapeHtml(p); }));
+    }
+
+    // 配图（v2 生成，服务端渲染的 SVG）
+    html += renderFigures(c.figures);
+
+    // 思考题 + 迁移任务参考答案（点按钮才展开）
     if (c.think_question) {
       html += '<div class="section"><div class="section-title">想一想</div>' +
-        '<div class="think-box"><span class="think-label">思考题</span>' + escapeHtml(c.think_question) + '</div>' +
+        '<div class="think-box"><span class="think-label">思考题</span>' +
+        escapeHtml(c.think_question) + '</div>' +
         (c.think_answer ? '<button class="think-answer-btn" type="button">看 AI 回答</button>' +
           '<div class="think-answer" style="display:none">' + escapeHtml(c.think_answer) + '</div>' : '') +
         '</div>';
@@ -1662,7 +1707,8 @@
     msg.textContent = '';
     if (!val) { msg.className = 'create-msg err'; msg.textContent = '请输入主题或链接'; return; }
 
-    var body = { template: createTemplate };
+    // 不传 template：服务端按主题自动判断内容构成
+    var body = {};
     if (/^https?:\/\//i.test(val)) body.url = val; else body.topic = val;
     var btn = $('createSubmit');
     btn.disabled = true;
@@ -1701,9 +1747,8 @@
   // ---------- 计划 ----------
   var planOutline = [];
   var planTitle = '';
-  var createTemplate = 't2_reading';
+  // planTemplate 仍是内部变量（驱动内容构成），但用户界面上不再暴露类型
   var planTemplate = 't4_trivia';
-  var planAutoMode = true;   // true=AI 自动判断类型；false=手动指定
   var TPL_LABEL = { 't1_vocab': '词汇', 't2_reading': '精读', 't3_math': '数学', 't4_trivia': '通识', 't5_skill': '技能', 't6_code': '代码' };
   var planScale = 50;
   var planPace = 3;
@@ -1913,9 +1958,7 @@
     $('planOutlineBtn').textContent = '生成学习大纲';
     planOutline = [];
     planTitle = '';
-    planAutoMode = true;   // 每次打开默认 AI 自动判断类型
     planTemplate = 't4_trivia';
-    markPlanTplActive('__auto__');
     setTimeout(function () { $('planInput').focus(); }, 50);
   }
 
@@ -1924,13 +1967,6 @@
   }
 
   var disambigState = null;
-
-  function markPlanTplActive(tpl) {
-    var btns = document.querySelectorAll('#planTemplateRow .tpl-btn');
-    for (var i = 0; i < btns.length; i++) {
-      btns[i].classList.toggle('active', btns[i].getAttribute('data-tpl') === tpl);
-    }
-  }
 
   function disambiguateThenOutline(topic, template) {
     var btn = $('planOutlineBtn');
@@ -1961,13 +1997,8 @@
     $('disambigBox').style.display = 'none';
     var btn = $('planOutlineBtn');
     btn.disabled = true;
-    if (!planAutoMode) {
-      // 手动指定类型：走原消歧 → 大纲
-      disambiguateThenOutline(topic, planTemplate);
-      return;
-    }
-    // 自动模式：AI 先判断类型 + 方向歧义（一次调用，可感知结果）
-    btn.textContent = '识别类型中...';
+    // 先识别主题方向与内容构成（一次调用，结果可感知）
+    btn.textContent = '理解主题中...';
     postJSON('/api/plan/classify', { topic: topic }).then(function (r) { return r.json(); }).then(function (data) {
       if (data.error || !data.template) {
         // 识别失败 → 降级：用当前类型走手动流程
@@ -1977,9 +2008,10 @@
         return;
       }
       planTemplate = data.template;
-      markPlanTplActive(data.template);   // 按钮切到识别出的类型（可感知：不满意可手动改）
+      // 不再告诉用户"识别为「数学」"——类型不是用户该理解的概念，
+      // 只反馈"我理解到什么"，让用户能判断有没有被误解。
       msg.className = 'create-msg ok';
-      msg.textContent = '✨ 已识别为「' + (data.label || TPL_LABEL[data.template] || '') + '」' + (data.reason ? ' · ' + data.reason : '');
+      msg.textContent = '✨ ' + (data.reason || '已理解主题');
       btn.textContent = '拆解中...';
       if (data.has_ambiguity && (data.interpretations || []).length) {
         // 类型已定但方向有歧义 → 让用户选方向
@@ -3044,28 +3076,6 @@
     state.subView = null;
     loadDates().then(loadCards);
   });
-  var tplBtns = document.querySelectorAll('#templateRow .tpl-btn');
-  for (var t = 0; t < tplBtns.length; t++) {
-    tplBtns[t].addEventListener('click', function () {
-      createTemplate = this.getAttribute('data-tpl');
-      for (var s = 0; s < tplBtns.length; s++) tplBtns[s].classList.remove('active');
-      this.classList.add('active');
-    });
-  }
-  var planTplBtns = document.querySelectorAll('#planTemplateRow .tpl-btn');
-  for (var pt = 0; pt < planTplBtns.length; pt++) {
-    planTplBtns[pt].addEventListener('click', function () {
-      var tpl = this.getAttribute('data-tpl');
-      for (var ps = 0; ps < planTplBtns.length; ps++) planTplBtns[ps].classList.remove('active');
-      this.classList.add('active');
-      if (tpl === '__auto__') {
-        planAutoMode = true;   // 切回 AI 自动判断
-      } else {
-        planAutoMode = false;  // 手动指定，覆盖自动判断
-        planTemplate = tpl;
-      }
-    });
-  }
   var planScaleBtns = document.querySelectorAll('#planScaleRow .tpl-btn');
   for (var ps2 = 0; ps2 < planScaleBtns.length; ps2++) {
     planScaleBtns[ps2].addEventListener('click', function () {

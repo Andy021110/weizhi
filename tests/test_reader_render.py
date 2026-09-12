@@ -333,3 +333,117 @@ def test_postjsondata_helper_exists_and_parses():
     # 判卷与整卡提交都必须用它（这两处要读响应体）
     assert "postJSONData('/api/question/answer'" in code
     assert "postJSONData('/api/review/finish'" in code
+
+
+# ---------- CP22：按内容块渲染，不按类型分支 ----------
+#
+# 范围决策：六种固定卡片类型不是六种学习目标，只是内容表现形式。系统应按
+# 学习目标自动组合内容块。所以渲染层不再看 `_meta.template`，
+# 只看"这张卡里有哪些块"。下面第一组用例钉住"每张老类型的卡照样能渲染"，
+# 第二组钉住"混着来也能渲染"——后者是类型分家做不到的。
+
+def _render_cards(cards):
+    """用 reader.html 里的真实渲染函数渲染一批卡片，返回 {名字: html}。"""
+    src = open(READER, encoding="utf-8").read()
+    blocks = src[src.index("  var CARD_BLOCKS = ["):src.index("  function _section(")]
+    list_kinds = src[src.index("  var LIST_KINDS = "):src.index("  function renderCardContent(")]
+    fns = [_extract(src, n) for n in
+           ("escapeHtml", "renderBody", "renderFigures", "layerLabel",
+            "_section", "_numbered", "renderCardBlock", "renderCardContent")]
+    js = "\n".join([blocks, list_kinds] + fns + [
+        "var CARDS = %s;" % json.dumps(cards, ensure_ascii=False),
+        "var out = {};",
+        "Object.keys(CARDS).forEach(function (k) { out[k] = renderCardContent(CARDS[k]); });",
+        "process.stdout.write(JSON.stringify(out));",
+    ])
+    out = subprocess.run([_node(), "-e", js], capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr[-600:]
+    return json.loads(out.stdout)
+
+
+def _titles(html):
+    return re.findall(r'class="section-title">([^<]+)<', html)
+
+
+def test_every_legacy_card_type_still_renders_by_its_blocks():
+    """六种老类型都不再靠 template 分支，但各自的块必须照旧渲染出来。"""
+    out = _render_cards({
+        "vocab": {"word": "ephemeral", "phonetic": "/ɪˈfemərəl/", "pos_label": "adj.",
+                  "definition_cn": "短暂的", "etymology": "来自希腊语",
+                  "examples": [{"en": "a", "cn": "甲"}], "common_mistake": "别混"},
+        "words": {"words": [{"word": "a", "definition_cn": "甲",
+                             "example": {"en": "e", "cn": "c"}}]},
+        "math": {"intuition": "想象一个斜面", "example": "f(x)=x^2", "try_it": "自己推"},
+        "trivia": {"hook": "你知道吗", "body": "正文", "fun_facts": ["f1"],
+                   "share_line": "分享一句"},
+        "skill": {"steps": [{"step": "准备", "detail": "先收集"}],
+                  "bad_example": "别跳过", "good_example": "先写测试",
+                  "tip": "小步提交", "try_it": "今天就试"},
+        "code": {"summary": "一句话", "intuition": "直觉", "pseudocode": "if x: y()",
+                 "key_steps": ["一", "二"], "why": "为了性能", "example": "走一遍",
+                 "pitfalls": "注意越界"},
+    })
+    assert _titles(out["vocab"])[0] == "词汇详解", "词汇卡应先把单词摆出来"
+    assert "例句" in _titles(out["vocab"]) and "易错点" in _titles(out["vocab"])
+    assert "词库 · 1 词" in "".join(_titles(out["words"]))
+    assert _titles(out["math"]) == ["直觉理解", "走一遍例子", "今天就试"]
+    assert "你知道吗" in _titles(out["trivia"]) and "有趣细节" in _titles(out["trivia"])
+    assert _titles(out["skill"]) == ["步骤", "别这么做", "应该这么做", "进阶技巧", "今天就试"]
+    assert set(_titles(out["code"])) == {"一句话核心", "直觉理解", "核心逻辑（伪代码）",
+                                         "走一遍例子", "关键步骤", "为什么这么设计", "常见坑"}
+
+
+def test_one_card_can_carry_concept_math_and_code_at_once():
+    """这是类型分家做不到的能力：一张卡同时含概念、数学与代码，必须全渲染。"""
+    out = _render_cards({"mixed": {
+        "summary": "概念", "word": "w", "definition_cn": "d", "intuition": "直觉",
+        "body": "正文", "pseudocode": "code()",
+        "steps": [{"step": "s", "detail": "d"}], "try_it": "动手"}})
+    titles = _titles(out["mixed"])
+    for must in ("一句话核心", "直觉理解", "正文精读", "核心逻辑（伪代码）", "步骤", "今天就试"):
+        assert must in titles, "混合卡缺少 %s，实际 %s" % (must, titles)
+    assert out["mixed"].count('class="section"') >= 6
+
+
+def test_empty_blocks_do_not_produce_empty_sections():
+    """空数组不该渲染出空标题——那会让卡片看起来像坏了。"""
+    out = _render_cards({"sparse": {
+        "body": "正文", "examples": [], "steps": [], "key_steps": [],
+        "fun_facts": [], "words": [], "core_points": []}})
+    assert _titles(out["sparse"]) == ["正文精读"]
+    assert "核心观点" not in out["sparse"]
+
+
+def test_card_with_only_a_title_renders_nothing():
+    out = _render_cards({"t": {"title": "只有标题"}})
+    assert out["t"] == ""
+
+
+def test_renderer_does_not_branch_on_template():
+    """渲染层不该再出现 `_meta.template` / tpl 分支——这是本次决策的落点。"""
+    src = open(READER, encoding="utf-8").read()
+    start = src.index("  var CARD_BLOCKS = [")
+    end = src.index("  // ---------- 数据加载 ----------")
+    region = src[start:end]
+    assert "tpl === '" not in region
+    assert "_meta.template" not in region
+    assert "CARD_BLOCKS" in region and "renderCardBlock" in region
+
+
+def test_type_picker_is_gone_from_the_ui():
+    """六种类型选择器已从界面下线（范围决策）。"""
+    src = open(READER, encoding="utf-8").read()
+    for gone in ("templateRow", "planTemplateRow", "data-tpl=", "planAutoMode",
+                 "markPlanTplActive", "createTemplate"):
+        assert gone not in src, "界面里还有类型选择残留: %s" % gone
+    # 规模与节奏是用户真正该决定的维度，必须留着
+    assert "planScaleRow" in src and "planPaceRow" in src
+
+
+def test_blocks_all_have_a_renderer():
+    """CARD_BLOCKS 里每个 kind 都要有分支，否则那个块会被静默丢掉。"""
+    src = open(READER, encoding="utf-8").read()
+    fn = _extract(src, "renderCardBlock")
+    kinds = set(re.findall(r"kind: '(\w+)'", src))
+    for k in kinds:
+        assert "kind === '%s'" % k in fn, "renderCardBlock 缺少 kind=%s 的分支" % k
