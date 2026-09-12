@@ -119,7 +119,7 @@ weizhi/
 │   └── ops/                   #   quality and orchestration: inspection, agent, shadow
 ├── tools/                     # development and one-off scripts
 ├── deploy/                    # deploy scripts, systemd unit, nginx config
-├── docs/                      # 21 product and design documents
+├── docs/                      # 21 product and design documents + index
 │   └── assets/readme/         # images used by this README
 └── tests/                     # 578 tests
 ```
@@ -143,7 +143,7 @@ Data model and the finer design decisions are in [ARCHITECTURE.en.md](ARCHITECTU
 
 Every model call records provider, model, prompt version, input hash, latency, retries and errors; the input hash doubles as an idempotency cache key.
 
-Of the 21 documents under `docs/`, one is dedicated to [what I deliberately cut](docs/范围决策-保留降级合并删除.md) and one to [how the repo and production stay in sync](docs/部署守则-仓库与线上同步.md) (both in Chinese).
+Of the 21 documents under `docs/` (plus an [index](docs/README.md)), one is dedicated to [what I deliberately cut](docs/范围决策-保留降级合并删除.md) and one to [how the repo and production stay in sync](docs/部署守则-仓库与线上同步.md) (both in Chinese).
 
 The owner key and the read-only demo key are separate, and the demo role is refused every write operation on the server.
 
