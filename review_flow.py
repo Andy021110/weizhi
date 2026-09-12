@@ -103,18 +103,55 @@ def layering(questions):
 
 
 def queue_card(card):
-    """复习队列里下发给前端的卡片：题库已密封。
+    """复习队列里下发给前端的卡片：题库已密封（只含复习层）。"""
+    return sealed_card(card, review_questions(card))
+
+
+def study_card(card):
+    """学习/自测时下发的卡片：题库已密封（只含 `immediate` 层）。
+
+    `immediate` 的语义是「学完当场测」，所以阅读页的自测用它；
+    后续回忆交给复习流程。
+    """
+    return sealed_card(card, study_questions(card))
+
+
+# 任何时刻都只能把这些字段的**题干**下发，不能带答案
+_OPEN_QUESTION_KEEP = ("question",)
+
+
+def sealed_card(card, questions):
+    """下发给前端的卡片：题库与参考答案全部密封。
 
     `quiz` / `review_quiz` / `open_question` 一并去掉——留着任何一个
-    都等于把答案又发回去了（`open_question.reference_answer` 也是答案）。
+    都等于把答案又发回去了。`open_question` 只保留题干（前端要显示问题），
+    参考答案与评分要点由服务端在判分时自己取。
     """
     out = {k: v for k, v in card.items()
            if k not in ("quiz", "review_quiz", "open_question")}
-    picked = review_questions(card)
-    out["questions"] = seal(picked)
-    out["layers"] = layering(picked)
+    oq = card.get("open_question")
+    if isinstance(oq, dict) and oq.get("question"):
+        out["open_question"] = {k: oq.get(k) for k in _OPEN_QUESTION_KEEP}
+        out["has_open_question"] = True
+    out["questions"] = seal(questions)
+    out["layers"] = layering(questions)
     out["question_count"] = len(out["questions"])
     return out
+
+
+def open_question_of(card):
+    """取这张卡的简答题（含参考答案）。**只给服务端判分用，不下发。**"""
+    oq = card.get("open_question")
+    if not isinstance(oq, dict):
+        return None
+    if not oq.get("reference_answer"):
+        return None
+    return oq
+
+
+def seal_cards(cards):
+    """批量密封（列表接口用）。"""
+    return [study_card(c) for c in (cards or [])]
 
 
 def confidence_proxy(elapsed_ms):

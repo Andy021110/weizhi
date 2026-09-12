@@ -4,6 +4,8 @@
 这一层的核心不是"能判对错"，而是**答案不出现在下发给浏览器的数据里**——
 所以第一条用例就在钉这件事。
 """
+import json
+
 import pytest
 
 import db
@@ -67,13 +69,15 @@ def test_seal_removes_every_answer_field():
 
 def test_queue_card_carries_no_answer_anywhere():
     """整份下发数据里不能出现任何答案字段——这是这一层的存在理由。"""
-    import json
     qc = review_flow.queue_card(V2_CARD)
     blob = json.dumps(qc, ensure_ascii=False)
     assert "即时解析" not in blob and "回忆解析" not in blob
     assert "即时误解" not in blob
     assert "参考答案" not in blob, "open_question 的参考答案也是答案"
-    assert "quiz" not in qc and "review_quiz" not in qc and "open_question" not in qc
+    assert "quiz" not in qc and "review_quiz" not in qc
+    # open_question 允许留下**题干**（前端要显示问题），但不许带答案
+    assert qc["open_question"] == {"question": "简答题"}
+    assert "reference_answer" not in blob and "grading_points" not in blob
     # 但题面必须在
     assert [q["question"] for q in qc["questions"]] == ["回忆题", "迁移题"]
     assert qc["layers"] == {"day1": 1, "day7": 1}
@@ -336,3 +340,49 @@ def test_refresh_backfills_review_schedule(tmp_db):
     assert entry and entry[0]["scheduled"] is True
     assert db.get_card(key)["next_review_at"]
     assert db.get_card(key)["memory_state"] == "learning"
+
+
+# ---------- CP21：学习/自测侧也要密封 ----------
+
+def test_study_card_keeps_only_immediate_layer():
+    sc = review_flow.study_card(V2_CARD)
+    assert [q["question"] for q in sc["questions"]] == ["即时题"]
+    assert sc["layers"] == {"immediate": 1}
+    assert "quiz" not in sc and "review_quiz" not in sc
+    blob = json.dumps(sc, ensure_ascii=False)
+    assert "即时解析" not in blob and "即时误解" not in blob
+
+
+def test_study_card_keeps_question_but_not_answer():
+    """简答题要能显示题干，参考答案必须留服务端。"""
+    sc = review_flow.study_card(V2_CARD)
+    assert sc["open_question"] == {"question": "简答题"}
+    assert sc["has_open_question"] is True
+    assert "reference_answer" not in json.dumps(sc, ensure_ascii=False)
+
+
+def test_open_question_of_reads_from_server_side_card():
+    """参考答案只在服务端可读——判分时由服务端自己取。"""
+    oq = review_flow.open_question_of(V2_CARD)
+    assert oq["reference_answer"] == "参考答案"
+    assert review_flow.open_question_of({"open_question": {"question": "x"}}) is None
+    assert review_flow.open_question_of({}) is None
+
+
+def test_seal_cards_is_batch_and_safe_on_empty():
+    assert review_flow.seal_cards([]) == []
+    assert review_flow.seal_cards(None) == []
+    out = review_flow.seal_cards([V2_CARD, make_card(source_url="custom:x:1")])
+    assert len(out) == 2
+    for c in out:
+        assert "quiz" not in c and "review_quiz" not in c
+        assert c["questions"], "老卡也要有可做的题"
+
+
+def test_vocab_style_card_without_questions_still_works():
+    """词汇卡可能没有选择题（只有 words）。密封不能让它变成空卡。"""
+    card = make_card(template="t1_vocab", quiz=[], review_quiz=[])
+    sc = review_flow.study_card(card)
+    assert sc["question_count"] == 0
+    assert sc["layers"] == {}
+    assert sc["title"] == card["title"]

@@ -63,6 +63,37 @@ def load_config():
     return {}
 
 
+def _int_arg(value, default=-1):
+    """把请求里的整数字段转成 int，缺省或非法时给 default。
+
+    **不能用 `value or default`**：0 是合法值（第 1 题、选项 A），
+    但它 falsy，会被换成 default，于是永远越界。
+    """
+    if value is None or value == "":
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _sealed(cards):
+    """批量密封卡片题库。`review_flow` 缺失时原样返回（v1 老路径不能断）。"""
+    if not review_flow:
+        return cards
+    return review_flow.seal_cards(cards)
+
+
+def _sealed_one(card):
+    """单卡密封，返回可合并进响应 dict 的字段。"""
+    if not review_flow or not card:
+        return {}
+    sealed = review_flow.study_card(card)
+    return {k: v for k, v in sealed.items()
+            if k in ("questions", "layers", "question_count",
+                     "open_question", "has_open_question")}
+
+
 def load_access_token():
     """从 config.json 读取访问 token（为空则不鉴权）。"""
     return load_config().get("access_token", "")
@@ -877,7 +908,9 @@ class ReaderHandler(BaseHTTPRequestHandler):
                 limit = load_push_limit()
                 if len(cards) > limit:
                     cards = cards[:limit]
-            self._send_json({"cards": cards})
+            # 下发前密封题库。此前每道题的 answer 与简答题参考答案都在
+            # 这份响应里，打开开发者工具就能看到——自测就不成立了。
+            self._send_json({"cards": _sealed(cards)})
             return
 
         if path == "/api/state":
@@ -898,7 +931,7 @@ class ReaderHandler(BaseHTTPRequestHandler):
             plan_id = int((qs.get("id") or [0])[0])
             self._send_json({
                 "plan": db.get_plan(plan_id),
-                "cards": db.load_plan_cards(plan_id),
+                "cards": _sealed(db.load_plan_cards(plan_id)),
             })
             return
 
@@ -930,9 +963,11 @@ class ReaderHandler(BaseHTTPRequestHandler):
             # 只返回前端展示所需字段，避免携带 _gen_input 等内部数据
             keys = ["source_url", "title", "template", "summary", "body", "difficulty",
                     "timeliness", "credibility", "published", "author", "source",
-                    "think_question", "think_answer", "open_question", "quiz",
-                    "core_points", "_meta"]
-            self._send_json({"card": {k: card.get(k) for k in keys if k in card}})
+                    "think_question", "think_answer", "core_points", "_meta"]
+            picked = {k: card.get(k) for k in keys if k in card}
+            # 题库与简答题参考答案一并密封：这个接口同样返回给浏览器
+            picked.update(_sealed_one(card))
+            self._send_json({"card": picked})
             return
 
         if path == "/api/favorites":
@@ -1028,13 +1063,27 @@ class ReaderHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/grade":
-            result = grade_answer(
-                load_api_key(),
-                req.get("question", ""),
-                req.get("reference_answer", ""),
-                req.get("grading_points", []),
-                req.get("answer", ""),
-            )
+            # 参考答案由服务端按 card_key 自己取，不再从前端收。
+            # 此前前端把 reference_answer 一起传上来，等于把它先发给了浏览器。
+            question, reference, points = (req.get("question", ""),
+                                           req.get("reference_answer", ""),
+                                           req.get("grading_points") or [])
+            card_key = req.get("card_key") or ""
+            if card_key:
+                card = db.get_card(card_key)
+                oq = review_flow.open_question_of(card) if (card and review_flow) else None
+                if not oq:
+                    self._send_json({"error": "这张卡没有可评分的简答题"})
+                    return
+                question = oq.get("question") or question
+                reference = oq.get("reference_answer") or reference
+                points = oq.get("grading_points") or points
+            result = grade_answer(load_api_key(), question, reference, points,
+                                  req.get("answer", ""))
+            if isinstance(result, dict) and reference:
+                # 参考答案**判分后**才回传：提交前不发，提交后要发，
+                # 否则用户看不到可以对照的标准是什么。
+                result = dict(result, reference_answer=reference)
             self._send_json(result)
             return
 
@@ -1164,9 +1213,11 @@ class ReaderHandler(BaseHTTPRequestHandler):
         if path == "/api/question/answer":
             # 服务端判卷。这是唯一一处知道答案的地方，返回的反馈里带
             # 「错误原因」与掌握度变化（方案 M4 要求用户能看到错在哪）。
+            # 注意不能用 `int(x or -1)`：`0 or -1` 是 -1，第 1 题与选项 A
+            # 永远会被判成越界。这个坑真踩过（e2e 抓到的）。
             feedback, err = review_flow.answer_question(
-                req.get("card_key", ""), int(req.get("index", -1) or -1),
-                int(req.get("chosen", -1) or -1),
+                req.get("card_key", ""), _int_arg(req.get("index")),
+                _int_arg(req.get("chosen")),
                 elapsed_ms=req.get("elapsed_ms"),
                 hint_used=bool(req.get("hint_used")),
             )

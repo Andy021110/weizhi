@@ -58,7 +58,8 @@ def main():
     check("无解析", "解析" not in blob)
     check("无错误原因", "把循环和流水线混为一谈" not in blob and "漏掉了边界条件" not in blob)
     check("无原始题库字段", "review_quiz" not in blob)
-    check("无简答题参考答案", "open_question" not in blob)
+    check("简答题只留题干（无参考答案）",
+          "reference_answer" not in blob and "grading_points" not in blob)
     check("只考 day1/day7 层", c["layers"] == {"day1": 1, "day7": 1})
 
     print()
@@ -129,6 +130,49 @@ def main():
     print("     %s" % json.dumps({k: v for k, v in daily.items() if k != "due"},
                                  ensure_ascii=False))
     check("概览接口可用", "due_count" in daily)
+
+    print()
+    print("=== 8. CP21：/api/cards 与 /api/card 也要密封 ===")
+    from datetime import datetime
+    today = datetime.now().strftime("%Y-%m-%d")
+    cards = req("/api/cards?date=" + today).get("cards") or []
+    blob = json.dumps(cards, ensure_ascii=False)
+    check("列表接口返回了卡片", bool(cards), "%d 张" % len(cards))
+    check("列表不含 answer 字段", '"answer"' not in blob)
+    check("列表不含参考答案", "reference_answer" not in blob)
+    check("列表不含评分要点", "grading_points" not in blob)
+    check("列表不含原始题库字段", "review_quiz" not in blob)
+    mine = [c for c in cards if c.get("source_url") == KEY]
+    if mine:
+        c0 = mine[0]
+        print("     题面字段: %s" % sorted((c0.get("questions") or [{}])[0].keys()))
+        print("     open_question: %s" % c0.get("open_question"))
+        check("含密封题库 questions", bool(c0.get("questions")))
+        check("简答题只留题干", c0.get("open_question") == {"question": "简答题"})
+
+    print()
+    print("=== 9. 单卡详情接口同样密封 ===")
+    # 卡号里带 # （v2 去重前缀），必须编码否则会被当成 URL fragment 丢掉
+    import urllib.parse
+    one = req("/api/card?source_url=" + urllib.parse.quote(KEY, safe="")).get("card") or {}
+    oblob = json.dumps(one, ensure_ascii=False)
+    check("单卡不含 answer", '"answer"' not in oblob)
+    check("单卡不含参考答案", "reference_answer" not in oblob)
+    check("单卡含密封题库", bool(one.get("questions")))
+
+    print()
+    print("=== 10. 学习自测判卷（immediate 层）===")
+    fb3 = req("/api/question/answer", {"card_key": KEY, "index": 0, "chosen": 1})["feedback"]
+    print("     正确=%s 层=%s 错误原因=%s" % (fb3["correct"], fb3["layer"], fb3["error_reason"]))
+    check("学习层的题也能服务端判卷", fb3["layer"] == "immediate" and fb3["correct"] is True)
+
+    print()
+    print("=== 11. 简答题：参考答案只在判分后回传 ===")
+    g = req("/api/grade", {"card_key": KEY, "answer": "简答题"})
+    print("     score=%s has_reference=%s" % (g.get("score"), "reference_answer" in g))
+    check("判分后回传参考答案", bool(g.get("reference_answer")))
+    g2 = req("/api/grade", {"card_key": "不存在", "answer": "x"})
+    check("无卡可判时给出明确错误", bool(g2.get("error")), str(g2.get("error")))
 
     print()
     if FAILS:

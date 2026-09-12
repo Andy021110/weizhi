@@ -233,3 +233,103 @@ def test_layer_labels_and_score_format():
         "当日巩固", "24 小时回忆", "一周后迁移", "其他",
         "0.40", "0.46", "-0.12", "0.00",
     ]
+
+
+# ---------- CP21：三处自测都必须走服务端判卷 ----------
+#
+# 复习流程已改好之后，卡片详情自测与计划任务自测还留着 `data-correct`
+# 本地判卷——同一个泄露点换了个地方。这组用例把三处一起钉住。
+
+def _script():
+    """整段 <script>（含注释，因为下面要按行判断）。"""
+    src = open(READER, encoding="utf-8").read()
+    return "\n;\n".join(re.findall(r"<script[^>]*>(.*?)</script>", src, re.S))
+
+
+def _code_lines():
+    """去掉整行注释的 script 行——守卫要看代码，不看说明文案。"""
+    return [l for l in _script().split("\n") if not l.strip().startswith("//")]
+
+
+def test_no_client_side_grading_left_anywhere():
+    code = "\n".join(_code_lines())
+    for bad, why in (("data-correct", "答案被写进 DOM 属性"),
+                     ("data-opt", "旧的本地判卷选项属性"),
+                     ("c.quiz", "从原始题库取题（那里带答案）")):
+        assert bad not in code, "全站仍有本地判卷痕迹 %s（%s）" % (bad, why)
+
+
+def test_all_three_flows_call_the_grading_endpoint():
+    """复习、卡片详情、计划任务——三处都要打同一个判卷端点。"""
+    code = "\n".join(_code_lines())
+    assert code.count("/api/question/answer") == 1, "判卷端点应只在一处封装"
+    for fn in ("renderReviewQuiz", "chooseAnswer", "renderTaskQuiz"):
+        assert "function %s(" % fn in code
+    # 三处作答都经由 gradeQuestion
+    assert code.count("gradeQuestion(") >= 4, "三处作答 + 定义都应走 gradeQuestion"
+
+
+def test_reference_answer_never_travels_to_the_client():
+    code = "\n".join(_code_lines())
+    assert "reference_answer:" not in code, "前端在上传参考答案"
+    assert "oq.reference_answer" not in code and "toq.reference_answer" not in code, \
+        "前端仍直接读参考答案"
+    # 但判分后要展示服务端回传的参考答案
+    assert code.count("data.reference_answer") >= 2, "判分后应展示服务端回传的参考答案"
+
+
+def test_grading_reports_question_index_not_client_answer():
+    """判卷靠 (卡号, 题号, 选项号)，前端不参与对错判断。"""
+    code = "\n".join(_code_lines())
+    assert "data-qidx" in code and "data-orig" in code
+    assert "correct_index" in code, "高亮应使用服务端返回的正确下标"
+
+
+def _statement_at(code, i):
+    """从 i 起取到当前语句的 `;`（跳过字符串与括号内的分号）。
+
+    必须按语句边界取：按固定字符数取窗口会溢到后面的代码里，
+    于是后续函数体里的 `data.` 被误判成"读了响应体"，守卫就会误报。
+    """
+    depth, quote, j = 0, None, i
+    while j < len(code):
+        ch = code[j]
+        if quote:
+            if ch == "\\":
+                j += 2
+                continue
+            if ch == quote:
+                quote = None
+        elif ch in "\"'`":
+            quote = ch
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif ch == ";" and depth == 0:
+            return code[i:j + 1]
+        j += 1
+    return code[i:i + 400]
+
+
+def test_postjson_calls_that_read_the_body_parse_json():
+    """`postJSON` 返回 Response，不是数据。直接读 res.success 永远是 undefined，
+    而且不报错——只会表现成"功能默默失效"。这个 bug 真上线过。"""
+    code = "\n".join(_code_lines())
+    offenders = []
+    for m in re.finditer(r"postJSON\('", code):
+        stmt = _statement_at(code, m.start())
+        reads_body = ("res." in stmt) or ("data." in stmt)
+        if reads_body and ".json()" not in stmt:
+            offenders.append(stmt[:140].replace("\n", " "))
+    assert not offenders, ("这些 postJSON 读了响应体但没解析 JSON"
+                           "（应改用 postJSONData）：\n" + "\n".join(offenders))
+
+
+def test_postjsondata_helper_exists_and_parses():
+    code = "\n".join(_code_lines())
+    assert "function postJSONData(" in code
+    assert "return postJSON(url, body).then(function (r) { return r.json(); });" in code
+    # 判卷与整卡提交都必须用它（这两处要读响应体）
+    assert "postJSONData('/api/question/answer'" in code
+    assert "postJSONData('/api/review/finish'" in code
