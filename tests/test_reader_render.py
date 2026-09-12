@@ -154,3 +154,82 @@ def test_caption_and_reading_are_escaped():
 def test_caption_markup_is_not_treated_as_html():
     f = dict(FIG, caption="**不是加粗**")
     assert "**不是加粗**" in _run_render([f])
+
+
+# ---------- 复习流程：答案不能回到前端 ----------
+#
+# 这一组守的是 M4 的核心决定：判卷在服务端做。此前每道题的 answer 随卡片
+# 下发、由前端比对，打开开发者工具就能看到答案——"复习"就不成立了。
+# 一旦有人把本地判卷改回来，下面这些用例会红。
+
+def _strip_js_comments(text):
+    """去掉整行 `//` 注释。
+
+    守卫要看的是**代码**而不是散文：注释里提到 "c.quiz" 是为了说明
+    "以前是这么写的"，那不是要拦的东西。不剥注释就会把说明文案当成违规。
+    """
+    return "\n".join(l for l in text.split("\n") if not l.strip().startswith("//"))
+
+
+def _review_region():
+    """截出复习流程的 JS 段，并剥掉注释。"""
+    src = open(READER, encoding="utf-8").read()
+    start = src.index("// ---------- 复习 ----------")
+    end = src.index("function skipCurrentReview()")
+    return _strip_js_comments(src[start:end])
+
+
+def test_review_flow_does_not_grade_on_the_client():
+    region = _review_region()
+    for bad in ("data-correct", "q.answer", "correctIdx", "=== st.quiz[st.index].answer"):
+        assert bad not in region, "复习流程又出现了本地判卷痕迹: %s" % bad
+
+
+def test_review_flow_calls_the_grading_endpoint():
+    region = _review_region()
+    assert "/api/question/answer" in region
+    assert "data-orig" in region, "选项必须带原始下标，否则服务端无法判卷"
+
+
+def test_review_flow_reads_the_sealed_question_bank():
+    region = _review_region()
+    assert "c.questions" in region, "题目应来自服务端密封题库"
+    assert "review_quiz" not in region and "c.quiz" not in region, \
+        "不该再从原始字段取题（那里带答案）"
+
+
+def test_review_flow_shows_error_reason():
+    """方案 M4 要求用户看得到错在哪，而不只是正确答案。"""
+    region = _review_region()
+    assert "error_reason" in region
+    assert "review-error-reason" in region
+
+
+def test_review_flow_reports_card_result_once():
+    """SM-2 量的是「这张卡还记不记得」，逐题推进会让一次复习记成多次间隔跳跃。"""
+    region = _review_region()
+    assert region.count("/api/review/finish") == 1
+
+
+def test_review_flow_does_not_fake_success_on_grading_failure():
+    """判卷失败必须让用户重试，不能默默当答对——那会污染掌握度。"""
+    region = _review_region()
+    assert "判卷失败" in region
+    assert "st.answered = false" in region
+
+
+def test_layer_labels_and_score_format():
+    src = open(READER, encoding="utf-8").read()
+    js = "\n".join([
+        _extract(src, "layerLabel"),
+        _extract(src, "fmtScore"),
+        "process.stdout.write(JSON.stringify(["
+        "layerLabel('immediate'), layerLabel('day1'), layerLabel('day7'),"
+        "layerLabel('其他'), fmtScore(0.4), fmtScore(0.4567), fmtScore(-0.12), fmtScore(null)]));",
+    ])
+    out = subprocess.run([_node(), "-e", js], capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr[-400:]
+    assert json.loads(out.stdout) == [
+        "当日巩固", "24 小时回忆", "一周后迁移", "其他",
+        "0.40", "0.46", "-0.12", "0.00",
+    ]

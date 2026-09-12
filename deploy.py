@@ -47,6 +47,12 @@ IGNORE_SUFFIX = (".db", ".log", ".tgz", ".pyc")
 # 运营现场的临时脚本，同步方向是「服务器 → 仓库」，部署时不回传
 NEVER_DEPLOY = {"config.json"}
 
+# 这些文件被常驻 HTTP 服务加载。**改了它们必须重启服务**，否则线上跑的
+# 还是旧代码——而且不会有任何报错，只会表现为"改动没生效"。
+# 这个坑真踩过：部署完验证接口时拿到的是旧版本的响应。
+RESTART_TRIGGERING = {"reader.py", "reader.html", "db.py"}
+SERVICE = os.environ.get("WZ_SERVICE", "weizhi-reader")
+
 
 def _base(prog):
     """拼出 ssh/scp 的前缀。配了 WZ_PASS 就走 sshpass，否则用密钥。"""
@@ -184,6 +190,8 @@ def main(argv=None):
     ap.add_argument("--files", nargs="*", default=None, help="要部署的文件")
     ap.add_argument("--check", action="store_true", help="只报告漂移，不做任何改动")
     ap.add_argument("--force", action="store_true", help="明知要覆盖服务器内容时使用")
+    ap.add_argument("--no-restart", action="store_true",
+                    help="部署后不重启常驻服务（默认会重启）")
     args = ap.parse_args(argv)
 
     if args.check or not args.files:
@@ -199,6 +207,7 @@ def main(argv=None):
 
     import tempfile
     blocked = False
+    touched_service = False
     with tempfile.TemporaryDirectory() as tmp:
         for name in args.files:
             if name in NEVER_DEPLOY:
@@ -235,9 +244,24 @@ def main(argv=None):
                 blocked = True
             else:
                 print("✅ 已部署 %s" % name)
+                if name in RESTART_TRIGGERING:
+                    touched_service = True
     if blocked:
         print("\n有文件被拦下或失败。**先比对服务器与仓库**，不要直接 --force。")
         return 1
+
+    if touched_service and not args.no_restart:
+        r = _ssh("systemctl restart %s && sleep 2 && systemctl is-active %s"
+                 % (SERVICE, SERVICE))
+        state = (r.stdout or "").strip().splitlines()[-1:] or ["(无输出)"]
+        print("\n常驻服务已重启（改了它加载的文件，不重启跑的仍是旧代码）：%s"
+              % state[0])
+        if r.returncode != 0:
+            print("⚠️ 重启可能失败，请手工确认: systemctl status %s" % SERVICE)
+            return 1
+    elif touched_service:
+        print("\n⚠️ 提醒：本次改了常驻服务加载的文件但按 --no-restart 跳过了重启，"
+              "线上仍跑旧代码。需执行：systemctl restart %s" % SERVICE)
     return 0
 
 

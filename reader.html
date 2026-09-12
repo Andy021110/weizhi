@@ -463,6 +463,14 @@
   .review-quiz-result { text-align: center; padding: 18px 0; }
   .review-quiz-score { font-size: 30px; font-weight: 800; color: var(--primary); }
   .review-quiz-sub { font-size: 13px; color: var(--text-2); margin-top: 6px; }
+  /* 判卷反馈：错误原因是范围决策与方案 M4 都要求的，视觉上要够显眼，
+     否则读者只会看到"答案是 C"，不知道自己错在哪 */
+  .review-error-reason { margin-top: 8px; font-size: 13px; color: #a35a38; background: #fdf3ec; border-left: 3px solid var(--accent); border-radius: 6px; padding: 9px 12px; line-height: 1.65; }
+  .review-mastery { margin-top: 8px; font-size: 12.5px; color: var(--text-3); }
+  .review-mastery-line { font-size: 13px; color: var(--text-2); margin-top: 10px; }
+  .review-mastery-line b { color: var(--primary-dark); }
+  .review-wrong-notes { margin-top: 12px; text-align: left; background: #faf7f2; border-radius: 8px; padding: 10px 12px; }
+  .review-wrong-note { font-size: 12.5px; color: var(--text-2); line-height: 1.6; }
   .review-done { text-align: center; padding: 70px 20px; }
   .review-done-num { font-size: 44px; font-weight: 800; color: var(--primary); }
   .review-done-sub { font-size: 14px; color: var(--text-2); margin: 12px 0 24px; }
@@ -2139,7 +2147,6 @@
   var reviewIndex = 0;
   var reviewAgain = [];
   var reviewAnswered = false;
-  var reviewCurrent = null;
   var reviewQuizState = null;
 
   function shuffle(arr) {
@@ -2194,11 +2201,18 @@
       '</div>';
 
     // 复习测验：review_quiz 全部逐题做（无则 fallback quiz，再无则「忘了/记得」）
-    var quiz = (c.review_quiz && c.review_quiz.length ? c.review_quiz : c.quiz) || [];
+    // 题目来自服务端密封过的题库（不含答案）。此前前端拿 c.quiz 里的
+    // answer 自己判卷——答案到了浏览器，复习就不成立了。
+    var quiz = c.questions || [];
     if (quiz.length) {
-      reviewQuizState = { quiz: quiz, index: 0, correct: 0, done: false, answered: false };
+      reviewQuizState = { quiz: quiz, index: 0, correct: 0, done: false, answered: false,
+                          answers: [], masteryFrom: null, masteryTo: null, shownAt: 0 };
+      var layerText = Object.keys(c.layers || {}).map(function (k) {
+        return layerLabel(k) + ' ' + c.layers[k] + ' 题';
+      }).join(' · ');
       html += '<div class="review-quiz-wrap">' +
-        '<div class="review-quiz-title">复习测验 · 共 ' + quiz.length + ' 题 · 做完自动判分</div>' +
+        '<div class="review-quiz-title">复习测验 · 共 ' + quiz.length + ' 题'
+        + (layerText ? '（' + layerText + '）' : '') + '</div>' +
         '<div id="reviewQuizArea"></div></div>';
     } else {
       reviewQuizState = null;
@@ -2221,39 +2235,85 @@
     }
   }
 
+  // ---------- 服务端判卷 ----------
+  // 前端不再持有答案。此前每道题的 answer 随卡片下发、由前端比对，
+  // 打开开发者工具就能看到；而且掌握度决定用户接下来学什么，
+  // 那个判断不能建立在客户端报上来的结果上。
+  function gradeQuestion(cardKey, index, chosen, elapsedMs) {
+    return postJSON('/api/question/answer', {
+      card_key: cardKey, index: index, chosen: chosen, elapsed_ms: elapsedMs
+    });
+  }
+
+  function layerLabel(layer) {
+    var m = { immediate: '当日巩固', day1: '24 小时回忆', day7: '一周后迁移' };
+    return m[layer] || layer;
+  }
+
+  function fmtScore(s) {
+    return (Math.round((Number(s) || 0) * 100) / 100).toFixed(2);
+  }
+
   function renderReviewQuiz() {
     var area = $('reviewQuizArea');
     var st = reviewQuizState;
     if (!st) return;
     if (st.done) { renderReviewQuizResult(); return; }
     var q = st.quiz[st.index];
-    var opts = shuffle(q.options.map(function (opt, i) { return { text: opt, correct: i === q.answer }; }));
+    // 选项要带上原始下标：判卷在服务端，必须把「原来第几个」原样传回去。
+    // 打乱只是为了不让选项位置泄露答案。
+    var opts = shuffle(q.options.map(function (text, i) { return { text: text, orig: i }; }));
     var letters = ['A', 'B', 'C', 'D'];
     st.answered = false;
-    var html = '<div class="review-q-progress">第 ' + (st.index + 1) + ' / ' + st.quiz.length + ' 题</div>';
+    st.shownAt = Date.now();
+    var html = '<div class="review-q-progress">第 ' + (st.index + 1) + ' / ' + st.quiz.length + ' 题'
+      + (q.layer ? ' · ' + layerLabel(q.layer) : '') + '</div>';
     html += '<div class="review-question">' + escapeHtml(q.question) + '</div>';
     html += opts.map(function (o, i) {
-      return '<button type="button" class="option review-opt" data-correct="' + (o.correct ? '1' : '0') + '"><span class="key">' + letters[i] + '</span><span>' + escapeHtml(cleanOpt(o.text)) + '</span></button>';
+      return '<button type="button" class="option review-opt" data-orig="' + o.orig + '">' +
+        '<span class="key">' + letters[i] + '</span><span>' + escapeHtml(cleanOpt(o.text)) + '</span></button>';
     }).join('');
-    html += '<div class="review-explain" style="display:none">' + escapeHtml(q.explanation || '') + '</div>';
+    html += '<div class="review-explain" style="display:none"></div>';
+    html += '<div class="review-error-reason" style="display:none"></div>';
+    html += '<div class="review-mastery" style="display:none"></div>';
     html += '<button class="review-next" id="reviewNextBtn" style="display:none"></button>';
     area.innerHTML = html;
 
     var optEls = area.querySelectorAll('.review-opt');
     for (var i = 0; i < optEls.length; i++) {
-      optEls[i].addEventListener('click', function () {
-        if (st.answered) return;
-        st.answered = true;
-        var isRight = this.getAttribute('data-correct') === '1';
-        if (isRight) st.correct++;
-        for (var k = 0; k < optEls.length; k++) {
-          optEls[k].classList.add('disabled');
-          if (optEls[k].getAttribute('data-correct') === '1') optEls[k].classList.add('correct');
-          else if (optEls[k] === this) optEls[k].classList.add('wrong');
-          else optEls[k].classList.add('muted');
+      optEls[i].addEventListener('click', function () { onReviewOption(this, optEls); });
+    }
+  }
+
+  function onReviewOption(btn, optEls) {
+    var st = reviewQuizState;
+    if (!st || st.answered) return;
+    st.answered = true;
+    var chosen = parseInt(btn.getAttribute('data-orig'), 10);
+    var elapsed = Date.now() - (st.shownAt || Date.now());
+    var card = reviewQueue[reviewIndex];
+    for (var k = 0; k < optEls.length; k++) optEls[k].classList.add('disabled');
+
+    gradeQuestion(card.source_url, st.quiz[st.index].index, chosen, elapsed)
+      .then(function (res) {
+        if (!res || !res.success) {
+          // 判卷失败不能假装答对了：宁可让用户重试，也不污染掌握度
+          var area = $('reviewQuizArea');
+          var ex = area.querySelector('.review-explain');
+          ex.style.display = 'block';
+          ex.textContent = '判卷失败：' + ((res && res.error) || '网络错误') + '，请再选一次';
+          st.answered = false;
+          for (var k2 = 0; k2 < optEls.length; k2++) optEls[k2].classList.remove('disabled');
+          return;
         }
-        area.querySelector('.review-explain').style.display = 'block';
-        var nextBtn = area.querySelector('#reviewNextBtn');
+        paintAnswer(optEls, res.feedback, chosen);
+        st.answers.push(res.feedback);
+        if (res.feedback.correct) st.correct++;
+        if (res.feedback.mastery) {
+          if (st.masteryFrom === null) st.masteryFrom = res.feedback.mastery.score;
+          st.masteryTo = res.feedback.mastery.score;
+        }
+        var nextBtn = $('reviewNextBtn');
         nextBtn.style.display = 'block';
         nextBtn.textContent = st.index === st.quiz.length - 1 ? '查看结果' : '下一题 ›';
         nextBtn.onclick = function () {
@@ -2261,6 +2321,31 @@
           else { st.index++; renderReviewQuiz(); }
         };
       });
+  }
+
+  // 高亮用的是服务端返回的 correct_index，前端不自己判断对错
+  function paintAnswer(optEls, fb, chosen) {
+    for (var k = 0; k < optEls.length; k++) {
+      var orig = parseInt(optEls[k].getAttribute('data-orig'), 10);
+      if (orig === fb.correct_index) optEls[k].classList.add('correct');
+      else if (orig === chosen) optEls[k].classList.add('wrong');
+      else optEls[k].classList.add('muted');
+    }
+    var area = $('reviewQuizArea');
+    var ex = area.querySelector('.review-explain');
+    if (fb.explanation) { ex.style.display = 'block'; ex.textContent = fb.explanation; }
+    // 错误原因：范围决策与方案 M4 都要求「用户能查看错误原因，
+    // 而不只看到正确答案」。答对时不显示，免得让人以为自己犯了错。
+    if (fb.error_reason) {
+      var er = area.querySelector('.review-error-reason');
+      er.style.display = 'block';
+      er.textContent = '错在哪：' + fb.error_reason;
+    }
+    if (fb.mastery) {
+      var m = area.querySelector('.review-mastery');
+      m.style.display = 'block';
+      m.textContent = '这项能力掌握度 ' + fmtScore(fb.mastery.score)
+        + ' · 累计答对 ' + fb.mastery.correct + '/' + fb.mastery.attempts;
     }
   }
 
@@ -2269,32 +2354,37 @@
     var st = reviewQuizState;
     var total = st.quiz.length;
     var pct = Math.round(st.correct / total * 100);
-    var passed = st.correct >= Math.ceil(total * 0.6);
-    area.innerHTML = '<div class="review-quiz-result">' +
-      '<div class="review-quiz-score">' + st.correct + ' / ' + total + '</div>' +
-      '<div class="review-quiz-sub">正确率 ' + pct + '% · ' + (passed ? '记得，间隔拉长' : '忘了，明天再见') + '</div>' +
-      '</div>';
-    submitReview(passed ? 1 : 0);
-  }
-
-  function answerReview(idx) {
-    if (reviewAnswered) return;
-    reviewAnswered = true;
-    var isRight = idx === reviewCurrent.correctIdx;
-    var opts = $('reviewOptions').querySelectorAll('.option');
-    for (var i = 0; i < opts.length; i++) {
-      opts[i].classList.add('disabled');
-      if (i === reviewCurrent.correctIdx) opts[i].classList.add('correct');
-      else if (i === idx) opts[i].classList.add('wrong');
-      else opts[i].classList.add('muted');
-    }
-    var exp = document.createElement('div');
-    exp.className = 'explain' + (isRight ? '' : ' wrong-ex');
-    exp.innerHTML = '<span class="ex-label">' + (isRight ? '答对了 · ' : '答错了 · ') + '</span>' + escapeHtml(reviewCurrent.explanation || '');
-    $('reviewOptions').appendChild(exp);
-    if (!isRight) reviewAgain.push(reviewQueue[reviewIndex].source_url);
-    postJSON('/api/review', { source_url: reviewQueue[reviewIndex].source_url, quality: isRight ? 1 : 0 }).catch(function () {});
-    setTimeout(function () { reviewIndex++; renderReviewCard(); }, 1200);
+    var card = reviewQueue[reviewIndex];
+    // 单卡答完才推进调度：SM-2 量的是「这张卡还记不记得」，
+    // 逐题推进会把一次复习记成多次间隔跳跃。
+    postJSON('/api/review/finish', {
+      card_key: card.source_url, correct: st.correct, total: total
+    }).then(function (res) {
+      var r = (res && res.result) || {};
+      var next = (r.state && r.state.next_review_at) || '';
+      var html = '<div class="review-quiz-result">' +
+        '<div class="review-quiz-score">' + st.correct + ' / ' + total + '</div>' +
+        '<div class="review-quiz-sub">正确率 ' + pct + '% · '
+        + (r.passed ? '记得，间隔拉长' : '忘了，明天再见')
+        + (next ? ' · 下次复习 ' + fmtDate(next) : '') + '</div>';
+      if (st.masteryFrom !== null && st.masteryTo !== null) {
+        var delta = st.masteryTo - st.masteryFrom;
+        html += '<div class="review-mastery-line">掌握度 ' + fmtScore(st.masteryFrom)
+          + ' → <b>' + fmtScore(st.masteryTo) + '</b>（'
+          + (delta >= 0 ? '+' : '') + fmtScore(delta) + '）</div>';
+      }
+      var wrong = st.answers.filter(function (a) { return !a.correct && a.error_reason; });
+      if (wrong.length) {
+        html += '<div class="review-wrong-notes">' + wrong.map(function (a) {
+          return '<div class="review-wrong-note">· ' + escapeHtml(a.error_reason) + '</div>';
+        }).join('') + '</div>';
+      }
+      html += '</div>';
+      html += '<button class="review-next" id="reviewResultNext" style="display:block">'
+        + (reviewIndex === reviewQueue.length - 1 ? '完成' : '下一张 ›') + '</button>';
+      area.innerHTML = html;
+      $('reviewResultNext').onclick = function () { reviewIndex++; renderReviewCard(); };
+    });
   }
 
   function submitReview(quality) {

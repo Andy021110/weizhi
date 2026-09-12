@@ -23,7 +23,7 @@
 """
 import hashlib
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import db
 import news
@@ -134,7 +134,8 @@ def figures_for_card(figures, width=None):
 
 
 def to_v1_card(draft, items, material=None, supplement=None, figures=None,
-               pack_id=None, draft_id=None, date=None, shadow=False):
+               pack_id=None, draft_id=None, date=None, shadow=False,
+               goal_key=None, concept=None, capability_gap=None):
     """把 v2 产出映射成 v1 卡片字典。
 
     `supplement` 缺省时 think_answer / open_question 为空——调用方应先跑
@@ -180,6 +181,12 @@ def to_v1_card(draft, items, material=None, supplement=None, figures=None,
         # 前端拿到就能直接注入，不需要在浏览器里重实现一遍布局算法——
         # 布局的可信来源只有 visual.py 一处。
         "figures": figure_items,
+        # 初始复习调度。**必须显式给**：`db.save_card` 不写 next_review_at，
+        # 而 `/api/review/queue` 只取 `next_review_at <= today` 的卡——
+        # 不给这一列，v2 的卡就永远不会出现在复习里。
+        # 定成明天：今天学，明天第一次回忆。这正是题库 `day1` 层的语义。
+        "next_review_at": (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d"),
+        "memory_state": "learning",
         "_meta": {
             "template": TEMPLATE,
             "category": "AI",
@@ -196,7 +203,11 @@ def to_v1_card(draft, items, material=None, supplement=None, figures=None,
             "draft_id": draft_id,
             "pack_id": pack_id,
             "objective": draft.get("objective"),
-            "milestone": None,
+            # 目标与里程碑是复习作答回流到 v2 掌握度的依据。做成显式参数
+            # 而不是在 from_draft 里事后补——纯映射函数才好单独测。
+            "goal_key": goal_key,
+            "milestone": concept,
+            "capability_gap": capability_gap,
             "layers": sorted({it.get("layer") for it in (items or []) if it.get("layer")}),
             "figures": len(figure_items),
             "figure_notes": figure_notes,
@@ -288,12 +299,12 @@ def from_draft(draft_id, items=None, material=None, provider=None, pack_id=None,
                     "site": (src or {}).get("title")}
 
     sup = supplement(provider, draft) if provider else {}
-    card = to_v1_card(draft, items, material, sup, figures,
-                      pack_id=pack_id, draft_id=draft_id, date=date, shadow=shadow)
-    if provider:
-        card["_bridge"]["milestone"] = row.get("concept")
-        card["_bridge"]["capability_gap"] = row.get("capability_gap")
-    return card
+    # 目标与里程碑要显式传进去：复习作答靠它把结果回流到 v2 掌握度，
+    # 而掌握度决定下一个学习包做什么。丢了它们，v2 侧永远是空白。
+    return to_v1_card(draft, items, material, sup, figures,
+                      pack_id=pack_id, draft_id=draft_id, date=date, shadow=shadow,
+                      goal_key=row.get("goal_key"), concept=row.get("concept"),
+                      capability_gap=row.get("capability_gap"))
 
 
 def save(card, date=None):
@@ -338,7 +349,16 @@ def refresh(limit=200, dry_run=False):
             updated.append({"draft_id": r["id"], "figures": len(items)})
             continue
         if db.merge_card_extra(key, patch):
-            updated.append({"draft_id": r["id"], "figures": len(items)})
+            # 顺手补复习调度：早期入库的 v2 卡没有 next_review_at，
+            # 而队列只取已到期的卡——不补它们就永远不会出现在复习里。
+            #
+            # 定成**今天**（不是明天）：要补的都是过去生成的卡，一天早就过完了，
+            # `day1` 层本来就该复习。定成明天等于再拖一天。
+            # 只补空值，不覆盖用户已复习出来的进度。
+            scheduled = db.set_card_review_schedule(
+                key, datetime.now().strftime("%Y-%m-%d"))
+            updated.append({"draft_id": r["id"], "figures": len(items),
+                            "scheduled": bool(scheduled)})
         else:
             missing.append({"draft_id": r["id"], "why": "库里没有对应的卡片"})
     return {"checked": len(rows), "updated": updated,

@@ -332,10 +332,17 @@ def save_card(card, date=None):
     batch_index = card.get("batch_index")
 
     # 额外字段（各模板专属字段，如 word/words/intuition/hook/steps 等）存 extra JSON
+    # 复习调度两列也要纳入 fixed：否则它们会落进 extra JSON，
+    # 读回来时 `_row_to_card` 的 `d.update(extra)` 会覆盖掉真正的列值，
+    # 于是「按 next_review_at 查到期卡」在写完之后就查不到了。
+    next_review_at = card.get("next_review_at")
+    memory_state = card.get("memory_state")
+
     fixed = {"source_url", "title", "summary", "body", "core_points", "think_question",
              "open_question", "quiz", "difficulty", "source", "category", "template",
              "generated_at", "date", "plan_id", "plan_index", "plan_total",
-             "group_index", "batch_index", "_meta", "_date"}
+             "group_index", "batch_index", "_meta", "_date",
+             "next_review_at", "memory_state"}
     extra = {k: v for k, v in card.items() if k not in fixed and v not in (None, "")}
     extra_json = _dump(extra) if extra else None
 
@@ -346,12 +353,12 @@ def save_card(card, date=None):
                (source_url, title, summary, body, core_points, think_question,
                 open_question, quiz, difficulty, source, category, template,
                 generated_at, date, plan_id, plan_index, plan_total,
-                group_index, batch_index, extra)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                group_index, batch_index, next_review_at, memory_state, extra)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (source_url, title, summary, body, core_points, think_question,
              open_question, quiz, difficulty, source, category, template,
              generated_at, date_str, plan_id, plan_index, plan_total,
-             group_index, batch_index, extra_json),
+             group_index, batch_index, next_review_at, memory_state, extra_json),
         )
         conn.commit()
         return cur.rowcount == 1
@@ -921,6 +928,33 @@ def update_card_extra(source_url, key, value):
             "UPDATE cards SET extra = ? WHERE source_url = ?",
             (_dump(extra) if extra else None, source_url),
         )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def set_card_review_schedule(source_url, next_review_at, memory_state="learning"):
+    """给一张卡补上复习调度，**只补空值**（已有进度不动）。返回是否写入。
+
+    单独一个函数而不是塞进 merge_card_extra：那两个是 extra JSON 里的字段，
+    这里改的是真正的列，混在一起以后没人分得清哪个字段存在哪。
+
+    「只补空值」是刻意的：补调度这件事会在桥接规则升级时被重复触发，
+    如果每次都覆盖，用户已经复习出来的间隔就被打回原点了。
+    """
+    if not source_url or not next_review_at:
+        return False
+    conn = _conn()
+    try:
+        row = conn.execute(
+            "SELECT id, next_review_at FROM cards WHERE source_url = ?", (source_url,)
+        ).fetchone()
+        if not row or row["next_review_at"]:
+            return False
+        conn.execute(
+            "UPDATE cards SET next_review_at = ?, memory_state = COALESCE(memory_state, ?) "
+            "WHERE id = ?", (next_review_at, memory_state, row["id"]))
         conn.commit()
         return True
     finally:

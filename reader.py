@@ -25,6 +25,11 @@ from openai import OpenAI
 
 import db
 
+try:                     # v2 侧模块。缺失时不致命——v1 的老路径仍要能跑
+    import review_flow
+except ImportError:      # pragma: no cover
+    review_flow = None
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("PORT", 8000))
 REPORTS_DIR = os.path.join(BASE_DIR, "quality_reports")
@@ -899,7 +904,15 @@ class ReaderHandler(BaseHTTPRequestHandler):
 
         if path == "/api/review/queue":
             today = datetime.now().strftime("%Y-%m-%d")
-            self._send_json({"reviews": db.get_due_reviews(today, limit=load_review_limit())})
+            cards = db.get_due_reviews(today, limit=load_review_limit())
+            # 下发前密封题库。此前每道题的 answer 随卡片一起发到浏览器，
+            # 前端自己比对——打开开发者工具就能看到答案，"复习"就不成立了。
+            self._send_json({"reviews": [review_flow.queue_card(c) for c in cards]})
+            return
+
+        if path == "/api/review/daily":
+            goal_key = (qs.get("goal") or [None])[0]
+            self._send_json(review_flow.daily_summary(goal_key))
             return
 
         if path == "/api/search":
@@ -1146,6 +1159,31 @@ class ReaderHandler(BaseHTTPRequestHandler):
         if path == "/api/review":
             result = db.schedule_review(req.get("source_url", ""), req.get("quality", 1))
             self._send_json({"success": bool(result), "state": result})
+            return
+
+        if path == "/api/question/answer":
+            # 服务端判卷。这是唯一一处知道答案的地方，返回的反馈里带
+            # 「错误原因」与掌握度变化（方案 M4 要求用户能看到错在哪）。
+            feedback, err = review_flow.answer_question(
+                req.get("card_key", ""), int(req.get("index", -1) or -1),
+                int(req.get("chosen", -1) or -1),
+                elapsed_ms=req.get("elapsed_ms"),
+                hint_used=bool(req.get("hint_used")),
+            )
+            if err:
+                self._send_json({"success": False, "error": err})
+                return
+            self._send_json({"success": True, "feedback": feedback})
+            return
+
+        if path == "/api/review/finish":
+            result, err = review_flow.finish_card(
+                req.get("card_key", ""),
+                req.get("correct", 0), req.get("total", 0))
+            if err:
+                self._send_json({"success": False, "error": err})
+                return
+            self._send_json({"success": True, "result": result})
             return
 
         if path == "/api/review/master":
