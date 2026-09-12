@@ -8,9 +8,11 @@
 2. **筛选失败要降级**。模型挂了不该导致当天一张卡都没有；
    筛选是优化，不能变成单点故障。
 """
+import json
 import os
 from datetime import datetime, timedelta
 
+import db
 import pipeline
 
 
@@ -192,3 +194,30 @@ def test_default_path_is_pick_not_legacy():
                           .split("\ndef _run_legacy")[0])
     assert "_run_pick" in default_branch
     assert "_run_legacy(" not in default_branch
+
+
+# ---------- 来源属性要记在材料上 ----------
+
+def test_ingest_source_records_source_meta(tmp_db):
+    """来源等级要记在材料上，不能只留一个卡上的标签——
+    「这条来自哪个源的哪一级」是判断可信度的原始依据，只留结论事后无法复核。"""
+    import evidence
+    sid, _ = evidence.ingest_source(
+        "https://openai.com/x", "某段足够长的正文内容，用来触发证据抽取。" * 12,
+        title="标题", site="OpenAI 官方",
+        meta={"source_id": "openai-com", "source_tier": "official",
+              "topics": ["models"], "published_at": "2026-09-12T00:00:00"})
+    row = db.get_v2_source_by_id(sid)
+    meta = json.loads(row["meta"] or "{}")
+    assert meta["source_tier"] == "official"
+    assert meta["source_id"] == "openai-com"
+    assert meta["topics"] == ["models"]
+
+
+def test_ingest_source_meta_is_optional(tmp_db):
+    """老调用点（v2_shadow）不传 meta 也必须能跑。"""
+    import evidence
+    sid, _ = evidence.ingest_source(
+        "https://x/y", "另一段够长的正文内容，同样用来触发抽取。" * 12)
+    assert sid
+    assert db.get_v2_source_by_id(sid)["meta"] in (None, "", "null")

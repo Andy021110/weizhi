@@ -220,10 +220,16 @@ def extract_claims(clean):
     return claims
 
 
-def ingest_source(url, raw, title=None, site=None, lang=None, snapshot_path=None):
+def ingest_source(url, raw, title=None, site=None, lang=None, snapshot_path=None,
+                  meta=None):
     """清洗 → 抽取 → 落库。返回 (source_id, claims)。
 
     同 url 重复 ingest 会覆盖（先清 claims 再写），保证重跑不累积、可重放。
+
+    `meta` 用来记这条材料的**来源属性**（来源 id / 等级 / 主题）。
+    为什么必须记在 source 上、而不只记在卡上：卡上只留了一个「权威度」标签，
+    而「这条材料来自哪个源的哪一级」是判断可信度的原始依据——
+    只留结论，事后无法复核。
     """
     clean = clean_text(raw)
     claims = extract_claims(clean)
@@ -235,6 +241,7 @@ def ingest_source(url, raw, title=None, site=None, lang=None, snapshot_path=None
         content_hash=content_hash(clean),
         clean_text=clean,
         snapshot_path=snapshot_path,
+        meta=meta,
     )
     db.save_v2_claims(source_id, claims)
     return source_id, claims

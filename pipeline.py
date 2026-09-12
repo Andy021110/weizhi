@@ -523,7 +523,14 @@ def generate_card_evidenced(provider, source, article, cfg=None):
 
     sid, claims = evidence.ingest_source(
         article["url"], text,
-        title=article.get("title"), site=source.get("name"))
+        title=article.get("title"),
+        site=source.get("name") or source.get("source_name"),
+        # 来源属性记在材料上，不只记在卡的标签上：「这条来自哪个源的哪一级」
+        # 是判断可信度的原始依据，只留一个标签的话事后无法复核。
+        meta={"source_id": source.get("source_id"),
+              "source_tier": _tier_of(source),
+              "topics": source.get("topics") or [],
+              "published_at": article.get("published_at")})
     if len(claims) < evidence.MIN_CLAIMS_FOR_PACK:
         return None, "证据不足（%d 条，需 ≥%d）" % (
             len(claims), evidence.MIN_CLAIMS_FOR_PACK)
