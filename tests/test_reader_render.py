@@ -447,3 +447,43 @@ def test_blocks_all_have_a_renderer():
     kinds = set(re.findall(r"kind: '(\w+)'", src))
     for k in kinds:
         assert "kind === '%s'" % k in fn, "renderCardBlock 缺少 kind=%s 的分支" % k
+
+
+# ---------- CP23：连续打卡不再作核心指标 ----------
+
+def test_streak_is_not_shown_anywhere():
+    """范围决策：连击不再作核心指标——用连续天数施压会把学习变成打卡。
+
+    只看代码不看注释：注释里写"连击已下线"正是我们应该留下的说明。
+    """
+    code = "\n".join(_code_lines())
+    for gone in ("streakNum", "ws.streak", "连击"):
+        assert gone not in code, "界面还有连击痕迹: %s" % gone
+
+
+def test_header_shows_cumulative_study_days():
+    src = open(READER, encoding="utf-8").read()
+    assert 'id="studyDays"' in src
+    assert "累计学习" in src
+    # 累计天数 = 有记录的天数，不是连续天数
+    code = "\n".join(_code_lines())
+    assert "$('studyDays').textContent" in code
+
+
+def test_stats_page_shows_block_distribution_not_templates():
+    """统计页也不能再暴露"类型"——换成内容块分布。"""
+    code = "\n".join(_code_lines())
+    assert "block_dist" in code
+    assert "template_dist" not in code
+    assert "内容块分布" in code
+    # 标题只从 CARD_BLOCKS 取，找不到就退回字段名
+    fn = _extract(open(READER, encoding="utf-8").read(), "blockTitle")
+    assert "CARD_BLOCKS" in fn
+
+
+def test_no_notification_type_hardcoded_in_frontend():
+    """前端不该自己列通知类型——白名单在服务端一处。"""
+    code = "\n".join(_code_lines())
+    for t in ("daily_summary", "daily_picks", "streak_warn", "stale_warn",
+              "weak_review", "action_log", "weekly_report"):
+        assert t not in code, "前端还在引用已停发的通知类型: %s" % t

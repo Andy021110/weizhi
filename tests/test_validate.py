@@ -39,24 +39,43 @@ def test_regen_capped_at_three(tmp_db, monkeypatch):
 
 
 def test_notification_type_whitelist(tmp_db, monkeypatch):
+    """白名单只放行 review_due（范围决策：通知精简到三类，
+    其中 badcase_pending / system_failure 由系统生成，模型不许自己发）。"""
     monkeypatch.setattr(da, "today_picks", lambda: [])
     decision = {
         "notifications": [
-            {"type": "daily_summary", "title": "今日状态", "body": "一切正常", "level": "info"},
+            {"type": "review_due", "title": "该复习了", "body": "有 5 张到期", "level": "warn"},
             {"type": "evil_type", "title": "非法类型", "body": "x", "level": "action"},
             {"title": "缺类型", "body": "x", "level": "info"},
-            {"type": "daily_summary", "title": "", "body": "空标题", "level": "info"},
+            {"type": "review_due", "title": "", "body": "空标题", "level": "warn"},
         ],
         "summary": "s",
     }
     out = da.validate_decision(decision, _signals(tmp_db, []))
     types = [n["type"] for n in out["notifications"]]
-    assert types == ["daily_summary"]  # 非法类型/缺类型/空标题全被滤
+    assert types == ["review_due"]  # 非法类型/缺类型/空标题全被滤
+
+
+def test_retired_notification_types_are_filtered(tmp_db, monkeypatch):
+    """**被停发的类型必须被拦下**——哪怕模型照着旧提示词编出来。
+
+    这条防的是回潮：范围决策取消了每日摘要、荐读推送、断签提醒、
+    过时卡提醒、周报，模型不该能把它们塞回来。"""
+    monkeypatch.setattr(da, "today_picks", lambda: [])
+    retired = ["daily_summary", "daily_picks", "streak_warn", "stale_warn",
+               "weak_review", "action_log", "weekly_report"]
+    decision = {
+        "notifications": [{"type": t, "title": "t", "body": "b", "level": "info"}
+                          for t in retired],
+        "summary": "s",
+    }
+    out = da.validate_decision(decision, _signals(tmp_db, []))
+    assert out["notifications"] == [], "被停发的类型不该通过校验"
 
 
 def test_level_fallback_to_info(tmp_db, monkeypatch):
     monkeypatch.setattr(da, "today_picks", lambda: [])
-    decision = {"notifications": [{"type": "daily_summary", "title": "t", "body": "b", "level": "critical"}],
+    decision = {"notifications": [{"type": "review_due", "title": "t", "body": "b", "level": "critical"}],
                 "summary": "s"}
     out = da.validate_decision(decision, _signals(tmp_db, []))
     assert out["notifications"][0]["level"] == "info"  # 非法 level 兜底 info

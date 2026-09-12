@@ -30,6 +30,8 @@ try:                     # v2 侧模块。缺失时不致命——v1 的老路�
 except ImportError:      # pragma: no cover
     review_flow = None
 
+import notifications
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("PORT", 8000))
 REPORTS_DIR = os.path.join(BASE_DIR, "quality_reports")
@@ -169,7 +171,7 @@ def _load_reports(days=7):
 
 
 def build_dashboard():
-    """学习仪表盘聚合：统计 + 模板分布 + 质量趋势/问题 + 画像 + 修复记录。
+    """学习仪表盘聚合：统计 + 内容块分布 + 质量趋势/问题 + 画像 + 修复记录。
 
     全部数据来自现有库与报告文件，无额外成本。前端「统计」页渲染。
     """
@@ -190,7 +192,8 @@ def build_dashboard():
             })
     return {
         "stats": db.stats(),
-        "template_dist": db.template_dist(),
+        # 内容块分布取代模板分布（类型已从界面下线）
+        "block_dist": db.block_dist(),
         "quality": {
             "pass_rate": report.get("pass_rate"),
             "avg_score": report.get("avg_score"),
@@ -1006,9 +1009,13 @@ class ReaderHandler(BaseHTTPRequestHandler):
 
         if path == "/api/notifications":
             unread = (qs.get("unread") or ["0"])[0] in ("1", "true")
+            # 只放行三类通知（范围决策）。列表与未读数用同一份类型白名单，
+            # 否则徽标会显示一堆点进去看不到的通知。
+            kinds = sorted(notifications.KEEP)
             self._send_json({
-                "notifications": db.list_notifications(limit=50, unread_only=unread),
-                "unread_count": db.count_unread_notifications(),
+                "notifications": db.list_notifications(
+                    limit=50, unread_only=unread, types=kinds),
+                "unread_count": db.count_unread_notifications(types=kinds),
             })
             return
 

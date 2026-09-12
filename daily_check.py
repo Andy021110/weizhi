@@ -23,7 +23,10 @@ from datetime import datetime, timedelta
 
 from openai import OpenAI
 
+import traceback
+
 import db
+import notifications
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 REPORTS_DIR = os.path.join(BASE_DIR, "quality_reports")
@@ -172,11 +175,6 @@ def usage_metrics():
     rate, mastered, total = db.mastery_rate()
     comp, comp_done, comp_due = db.compliance_on_date(today)
     acc, acc_total = db.review_accuracy_on_date(today)
-    streak = db.get_user_state("streak")
-    try:
-        streak = int(streak) if streak else 0
-    except (TypeError, ValueError):
-        streak = 0
     return {
         "date": today,
         "study_today": db.study_on_date(today),
@@ -191,7 +189,10 @@ def usage_metrics():
         "mastery_rate": rate,
         "mastered": mastered,
         "reviewing_total": total,
-        "streak": streak,
+        # 累计学习天数取代连续打卡（范围决策）。
+        # 连续天数会给用户施压、断一天就归零，衡量不出学进去多少；
+        # 累计天数不施压。它**不是**质量指标——质量看延迟回忆率与目标完成度。
+        "study_days": db.study_days(),
         "usage_today": db.events_on_date(today),  # M2：思考题/简答/日历/搜索使用率
     }
 
@@ -459,4 +460,14 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:  # noqa: BLE001
+        # 未捕获异常 = 这一轮巡检彻底没跑成，属于「系统任务失败且无法自动恢复」。
+        # 只在真失败时报：能重试、能降级、能自动修复的都不发，否则这个类型
+        # 会变成另一种噪音，而它存在的唯一理由就是稀有。
+        traceback.print_exc()
+        if "--dry-run" not in sys.argv:
+            notifications.failure("每日质检巡检", exc,
+                                  "本轮没有产出质检报告，需要人工看一眼")
+        raise

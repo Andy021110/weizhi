@@ -20,11 +20,13 @@ cron 3:35 跑（daily_check 3:30 之后），按 ReAct 循环落地：
 import argparse
 import json
 import os
+import traceback
 from datetime import datetime, timedelta
 
 from openai import OpenAI
 
 import db
+import notifications
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 REPORTS_DIR = os.path.join(BASE_DIR, "quality_reports")
@@ -44,8 +46,11 @@ AGENT_SYSTEM = """你是一位「私人学习管家 Agent」，负责替用户�
 1. 只输出合法的 JSON，不要输出 JSON 以外的文字。
 2. regen_candidates 只能从输入给出的可自动修复清单里选（source_url 必须原样匹配）；选中的会被系统自动修复，不要再在通知里提到它们。
 3. recommendations 只能从【今日新卡候选】里挑（source_url 必须原样匹配），最多 3 条；候选不足 3 条就少给，不要硬凑。
-4. notifications 的 type 只能是 daily_summary / daily_picks / review_due / streak_warn / stale_warn 之一（badcase_pending 由系统自动生成，你不用管）。
-5. 没必要的通知不要发（例如今天没有拖欠复习，就不发 review_due；过时卡 <3 张就不发 stale_warn）。
+4. notifications 的 type **只能是 review_due**。其余类型一律不要发，发了也会被拦下：
+   - 不发每日摘要/荐读推送/断签提醒/过时卡提醒/周报——这些都被明确取消了
+   - badcase_pending 与 system_failure 由系统按规则生成，你不用管
+5. 没有拖欠复习就不要发 review_due。**宁可一条都不发，也不要凑一条通知出来。**
+   通知只该在"用户必须做点什么"时出现。
 """
 
 AGENT_USER = """【今日质检报告】
@@ -65,10 +70,10 @@ AGENT_USER = """【今日质检报告】
   "summary": "今日状态一句话（30字内）",
   "notifications": [
     {{
-      "type": "daily_summary",
+      "type": "review_due",
       "title": "通知标题，15字内",
       "body": "通知正文，60字内",
-      "level": "info|warn|action"
+      "level": "warn"
     }}
   ],
   "recommendations": [
@@ -83,11 +88,10 @@ AGENT_USER = """【今日质检报告】
 }}
 
 要求：
-1. daily_summary 必发一条。
-2. 有值得读的新卡 → recommendations 给 Top 3（附 why）；没有好卡就不给（不要硬凑）。
-3. 复习拖欠（due>0 且完成率<60%）→ 发 review_due，level=warn。
-4. 断签或连续下滑 → 发 streak_warn，level=warn。
-5. 库内过时卡 ≥3 张 → 发 stale_warn，level=warn（正文给数量和最老的一张标题）。
+1. 有值得读的新卡 → recommendations 给 Top 3（附 why）；没有好卡就不给（不要硬凑）。
+   （recommendations 不再推送，只作为 App 内的发现层数据。）
+2. 复习拖欠（due>0 且完成率<60%）→ 发一条 review_due，level=warn。
+3. notifications 数组可以为空。**发通知的门槛是"用户必须做点什么"，不是"有话要说"。**
 """
 
 
@@ -155,24 +159,12 @@ def rule_signals(report, y_report):
     due = metrics.get("due_today") or 0
     compliance = metrics.get("compliance_today")
     review_due = bool(due > 0 and (compliance is None or compliance < 0.6))
-    # 断签
-    last_active = db.get_user_state("last_active_date")
-    streak = db.get_user_state("streak")
-    try:
-        streak = int(streak) if streak else 0
-    except (TypeError, ValueError):
-        streak = 0
-    gap_days = None
-    if last_active:
-        try:
-            gap_days = (datetime.now() - datetime.strptime(last_active, "%Y-%m-%d")).days
-        except ValueError:
-            gap_days = None
-    streak_broken = bool(gap_days is not None and gap_days >= 2)
-    # 学习下滑（对比昨日）
+    # 学习量（只作为背景信息给模型看，不据此发通知）
+    #
+    # 断签/下滑信号已移除（范围决策）：它们唯一的用途是生成 streak_warn，
+    # 而「断签焦虑」被明确取消。用连续天数施压会把学习变成打卡。
     study_today = metrics.get("study_today") or 0
     study_y = (y_report.get("metrics") or {}).get("study_today") or 0 if y_report else None
-    decline = bool(study_y is not None and study_y > 0 and study_today < study_y * 0.5)
     # 过时卡（C2）：fast >180 天 / event >14 天，未掌握且未读的
     stale = []
     for c in db.load_cards(None):
@@ -192,8 +184,7 @@ def rule_signals(report, y_report):
     return {
         "pending": pending,
         "review_due": {"due": due, "compliance": compliance},
-        "streak": {"days": streak, "last_active": last_active, "broken": streak_broken},
-        "study": {"today": study_today, "yesterday": study_y, "decline": decline},
+        "study": {"today": study_today, "yesterday": study_y},
         "stale": stale,
         "weak": db.weak_cards(limit=5),  # 学习画像：薄弱卡
         "profile": {k: db.get_profile().get(k) for k in ("topics", "accuracy")},
@@ -284,7 +275,8 @@ def validate_decision(decision, signals):
     for n in notifs:
         if not isinstance(n, dict) or not n.get("title") or not n.get("body"):
             continue
-        if n.get("type") not in ("daily_summary", "daily_picks", "review_due", "streak_warn", "stale_warn"):
+        # 白名单只有一个来源（notifications.KEEP），避免两处各写一份迟早漂移
+        if n.get("type") not in notifications.KEEP:
             continue
         if n.get("level") not in ("info", "warn", "action"):
             n["level"] = "info"
@@ -310,48 +302,31 @@ def validate_decision(decision, signals):
 
 
 def fallback(report, signals):
-    """规则兜底：LLM 失败时用模板生成通知。"""
-    metrics = report.get("metrics") or {}
+    """规则兜底：LLM 失败时用模板生成通知。
+
+    只生成三类允许的通知里的两类（到期复习 / 待拍板）。
+    每日摘要、断签提醒、过时卡、荐读推送都不再产生（范围决策）——
+    兜底路径也要守同一条规则，否则模型挂了反而会发更多通知。
+    """
     notifs = []
-    # 每日摘要（必发）
-    n_auto = len([a for a in (report.get("auto_actions") or []) if a.get("success")])
-    body = "检查 %d 张，通过率 %s，badcase %d 个" % (
-        report.get("checked") or 0,
-        ("%.0f%%" % ((report.get("pass_rate") or 0) * 100)) if report.get("pass_rate") is not None else "-",
-        len(report.get("badcases") or []),
-    )
-    if n_auto:
-        body += "，已自动修复 %d 张" % n_auto
-    notifs.append({"type": "daily_summary", "title": "今日巡检摘要",
-                   "body": body, "level": "info"})
     # 待拍板
     if signals["pending"]:
         names = "、".join((b.get("title") or "")[:10] for b in signals["pending"][:3])
         notifs.append({"type": "badcase_pending",
                        "title": "%d 张卡待你拍板" % len(signals["pending"]),
-                       "body": names + "。点「📋 质检」查看并处理。" , "level": "action"})
+                       "body": names + "。点「📋 质检」查看并处理。", "level": "action"})
     # 复习拖欠
     rd = signals["review_due"]
     if rd["due"] > 0 and (rd["compliance"] is None or rd["compliance"] < 0.6):
         notifs.append({"type": "review_due",
                        "title": "今天有 %d 张复习到期" % rd["due"],
-                       "body": "到期未复习，打开页面即可复习。" , "level": "warn"})
-    # 断签 / 下滑
-    if signals["streak"]["broken"]:
-        notifs.append({"type": "streak_warn", "title": "连击已中断",
-                       "body": "上次学习是 %s，回来续上吧。" % (signals["streak"]["last_active"] or "前几天"),
-                       "level": "warn"})
-    elif signals["study"]["decline"]:
-        notifs.append({"type": "streak_warn", "title": "学习量下滑",
-                       "body": "今日学习 %d 张 < 昨日 %d 张。" % (
-                           signals["study"]["today"], signals["study"]["yesterday"] or 0),
-                       "level": "warn"})
-    # 荐食兜底：取今日新卡前 3（LLM 挂了也要有东西可看）
+                       "body": "到期未复习，打开页面即可复习。", "level": "warn"})
+    # 荐读兜底：取今日新卡前 3。**不再推送**，只留给 App 内的发现层。
     recs = [{"source_url": p["source_url"], "title": p["title"], "why": "今日新卡，建议优先浏览"}
             for p in today_picks()[:3]]
-    return {"regen_candidates": [], "notifications": notifs[:4],
+    return {"regen_candidates": [], "notifications": notifs,
             "recommendations": recs,
-            "summary": "已按规则生成今日通知"}
+            "summary": "已按规则生成今日待办"}
 
 
 def execute(api_key, decision, signals, backup_dir, dry_run=False):
@@ -367,7 +342,7 @@ def execute(api_key, decision, signals, backup_dir, dry_run=False):
         key = n.get("type") + "|" + n.get("title")
         if key in existing:
             continue
-        db.add_notification(n["type"], n["title"], n["body"], level=n.get("level", "info"))
+        notifications.emit(n["type"], n["title"], n["body"], level=n.get("level", "info"))
     # 2. 自动修复
     for src in decision.get("regen_candidates") or []:
         old = db.get_card(src)
@@ -389,43 +364,21 @@ def execute(api_key, decision, signals, backup_dir, dry_run=False):
                         "success": ok, "reason": None if ok else r.get("error"),
                         "backup": backup if ok else None,
                         "new_source_url": (r.get("card") or {}).get("source_url") if ok else None})
-    # 3. 修复结果补一条通知（有修复时）
-    ok_n = [r for r in results if r.get("success")]
-    if ok_n:
-        db.add_notification(
-            "action_log", "自动修复 %d 张" % len(ok_n),
-            "已自动重生成：%s。不满意可到「📋 质检」回滚。" % "、".join(
-                (r.get("title") or "")[:10] for r in ok_n[:3]),
-            level="info")
-    # 4. 剩余待拍板（系统按规则生成，避免与自动修复重复/矛盾；修复失败的卡也留给用户）
+    # 3. 剩余待拍板（系统按规则生成，避免与自动修复重复/矛盾；修复失败的卡也留给用户）
+    #
+    # 原来的「自动修复成功」通知已删除：那是"普通成功通知"，属于噪音
+    # （范围决策）。修复结果仍在返回的 results 里，需要时看得到。
     done_urls = {r.get("source_url") for r in results if r.get("success")}
     remaining = [b for b in signals["pending"] if b.get("source_url") not in done_urls]
     if remaining:
         names = "、".join((b.get("title") or "")[:10] for b in remaining[:3])
-        db.add_notification(
-            "badcase_pending", "%d 张卡待你拍板" % len(remaining),
-            names + "。点「📋 质检」查看评分与理由，决定重生成或保留。", level="action")
-    # 5. 荐食（A1 daily_picks）：LLM 挑的 Top 3 + 为什么值得读
+        notifications.pending_review(len(remaining), names)
+    # 4. 荐读 Top 3：**不再推送**，存进 user_state 供 App 内的发现层读取。
+    #    直接删掉会让"为你挑出值得读的 Top 3"这个能力悄悄消失——数据先留着。
     recs = decision.get("recommendations") or []
     if recs:
-        body = "；".join("%s（%s）" % (r.get("title", "")[:18], r.get("why", "")) for r in recs[:3])
-        db.add_notification("daily_picks", "今日荐读 Top %d" % len(recs), body, level="info")
-    # 6. 过时卡提醒（C2）：系统规则兜底，≥3 张才发（LLM 没发就补）
-    stale = signals.get("stale") or []
-    has_stale = any(n.get("type") == "stale_warn" for n in (decision.get("notifications") or []))
-    if len(stale) >= 3 and not has_stale:
-        oldest = sorted(stale, key=lambda s: s.get("days", 0), reverse=True)[0]
-        db.add_notification(
-            "stale_warn", "%d 张卡可能过时" % len(stale),
-            "最早：「%s」（发布于 %s），建议重看或清理。" % ((oldest.get("title") or "")[:18], oldest.get("published")),
-            level="warn")
-    # 7. 薄弱卡提醒（画像）：复习记错 ≥2 次的未掌握卡，≥2 张时提醒优先复习
-    weak = signals.get("weak") or []
-    if len(weak) >= 2:
-        names = "、".join((w.get("title") or "")[:12] for w in weak[:3])
-        db.add_notification(
-            "weak_review", "%d 张薄弱卡待巩固" % len(weak),
-            names + "（记错 ≥2 次）。建议优先复习，必要时降低难度重看。", level="warn")
+        db.set_user_state("daily_picks", json.dumps(recs, ensure_ascii=False))
+    # 5. 过时卡 / 薄弱卡：不再单独发通知（属于内容质量，交给质检流程与复习提醒）
     return results
 
 
@@ -458,11 +411,17 @@ def main():
     decision = validate_decision(decision, signals) or fallback(report, signals)
     if args.no_regen:
         decision["regen_candidates"] = []
-    results = execute(api_key, decision, signals, BACKUP_DIR)
+    try:
+        results = execute(api_key, decision, signals, BACKUP_DIR)
+    except Exception as exc:  # noqa: BLE001
+        # 走到这里说明自动修复也救不回来——这是三类通知里唯一需要人的那一类
+        traceback.print_exc()
+        notifications.failure("每日质检编排", exc,
+                              "自动修复已尝试且失败，需要人工确认卡片库状态")
+        raise
 
-    # 学习周报（周日）：画像 + 本周学习复盘
-    if datetime.now().weekday() == 6 and not args.dry_run and not args.no_regen:
-        weekly_report()
+    # 学习周报已下线（范围决策：「每日生成报告」类通知取消）。
+    # 周报里的有效信息（延迟回忆率、薄弱点、兴趣主题）改在「质检」面板里看。
 
     print("== 管家决策 ==")
     print("summary:", decision.get("summary"))
@@ -471,31 +430,6 @@ def main():
     for r in results:
         print("修复:", r.get("success"), "|", (r.get("title") or r.get("source_url") or "")[:30],
               "|", r.get("reason") or "")
-
-
-def weekly_report():
-    """周日学习周报（画像驱动）：本周学习量、复习准确率、薄弱点、兴趣主题。"""
-    import sqlite3 as _sq
-    today = datetime.now()
-    week_ago = (today - timedelta(days=7)).strftime("%Y-%m-%d")
-    conn2 = _sq.connect(os.path.join(BASE_DIR, "weizhi.db"), timeout=30)
-    try:
-        study_n = conn2.execute(
-            "SELECT COUNT(*) FROM progress WHERE date >= ?", (week_ago,)
-        ).fetchone()[0]
-    finally:
-        conn2.close()
-    prof = db.get_profile()
-    accuracy = prof.get("accuracy")
-    weak = prof.get("weak") or []
-    topics = prof.get("topics") or []
-    body = "本周学习 %d 张；复习准确率 %s；%s。%s" % (
-        study_n,
-        ("%.0f%%" % (accuracy * 100)) if accuracy is not None else "-",
-        ("兴趣主题：" + "、".join(topics[:4])) if topics else "兴趣主题待积累",
-        ("薄弱卡 %d 张，建议优先巩固" % len(weak)) if len(weak) else "无薄弱卡，状态良好",
-    )
-    db.add_notification("weekly_report", "本周学习周报", body, level="info")
 
 
 if __name__ == "__main__":

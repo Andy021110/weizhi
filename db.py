@@ -877,21 +877,6 @@ def stats():
     }
 
 
-def template_dist():
-    """模板分布（仪表盘用）：[{template, name, count}]，按数量倒序。"""
-    conn = _conn()
-    try:
-        rows = conn.execute(
-            "SELECT template, COUNT(*) AS n FROM cards WHERE template IS NOT NULL GROUP BY template ORDER BY n DESC"
-        ).fetchall()
-    finally:
-        conn.close()
-    names = {"t1_vocab": "词汇", "t2_reading": "精读", "t3_math": "数学",
-             "t4_trivia": "通识", "t5_skill": "技能", "t6_code": "代码"}
-    return [{"template": r["template"], "name": names.get(r["template"], r["template"]),
-             "count": r["n"]} for r in rows]
-
-
 # ===== 质量巡检 M1：daily_check.py / /api/regen / /api/report 用 =====
 
 def get_card(source_url):
@@ -1131,6 +1116,54 @@ def reviewed_on_date(date):
     finally:
         conn.close()
     return row[0] if row else 0
+
+
+# 卡片的内容块字段。统计「有多少张卡带这个块」用。
+#
+# 与前端 `CARD_BLOCKS` 的 key 对应：这里只给字段名与计数，中文标题由前端
+# 从 CARD_BLOCKS 取——标题只应有一处来源。
+BLOCK_FIELDS = (
+    "word", "words", "hook", "summary", "intuition", "body", "pseudocode",
+    "examples", "example", "steps", "key_steps", "why", "bad_example",
+    "good_example", "tip", "common_mistake", "pitfalls", "fun_facts",
+    "share_line", "try_it", "etymology",
+)
+
+
+def block_dist():
+    """内容块分布：每个块有多少张卡带它（取前 8 多的）。
+
+    取代原来的「模板分布」（六种卡片类型）。类型已经从界面下线了——
+    它们不是用户该理解的概念，而"我的卡片里有多少带代码/带步骤/带例子"
+    才是用户真能拿来判断的事。
+    """
+    cards = load_cards(None)
+    counts = {}
+    for c in cards:
+        for f in BLOCK_FIELDS:
+            v = c.get(f)
+            if v in (None, "", []):
+                continue
+            counts[f] = counts.get(f, 0) + 1
+    rows = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    return [{"name": k, "count": v} for k, v in rows[:8]]
+
+
+def study_days():
+    """累计「有学习记录的天数」。
+
+    范围决策把**连续天数**从核心指标里去掉了：它会给用户施加打卡压力，
+    而且断一天就归零，衡量不出到底学进去多少。累计天数不施压、不会归零。
+
+    注意这不是"连续天数"的替身，它不用来判断学习质量——
+    质量看延迟回忆率、目标完成度与迁移任务。
+    """
+    conn = _conn()
+    try:
+        row = conn.execute("SELECT COUNT(DISTINCT date) FROM progress").fetchone()
+        return row[0] if row else 0
+    finally:
+        conn.close()
 
 
 def review_accuracy_on_date(date):
@@ -1382,33 +1415,45 @@ def add_notification(n_type, title, body, level="info", date=None):
         conn.close()
 
 
-def list_notifications(limit=50, unread_only=False):
-    """通知列表，倒序。unread_only=True 只返回未读。"""
+def list_notifications(limit=50, unread_only=False, types=None):
+    """通知列表，倒序。unread_only=True 只返回未读；types 限定类型。
+
+    `types` 用来只放行允许的通知类型（见 notifications.KEEP）。
+    在 SQL 里过滤而不是读出来再筛，是因为未读数也要用同一口径——
+    否则徽标会显示一堆点进去看不到的通知。
+    """
+    where, args = [], []
+    if unread_only:
+        where.append("read = 0")
+    if types:
+        where.append("type IN (%s)" % ",".join("?" * len(types)))
+        args.extend(types)
+    sql = "SELECT * FROM notifications"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY id DESC LIMIT ?"
+    args.append(limit)
     conn = _conn()
     try:
-        if unread_only:
-            rows = conn.execute(
-                "SELECT * FROM notifications WHERE read = 0 ORDER BY id DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM notifications ORDER BY id DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
+        rows = conn.execute(sql, args).fetchall()
     finally:
         conn.close()
     return [dict(r) for r in rows]
 
 
-def count_unread_notifications():
-    """未读通知数。"""
+def count_unread_notifications(types=None):
+    """未读数。`types` 与 list_notifications 用同一口径，否则徽标会对不上。"""
+    sql = "SELECT COUNT(*) FROM notifications WHERE read = 0"
+    args = []
+    if types:
+        sql += " AND type IN (%s)" % ",".join("?" * len(types))
+        args.extend(types)
     conn = _conn()
     try:
-        row = conn.execute("SELECT COUNT(*) FROM notifications WHERE read = 0").fetchone()
+        return conn.execute(sql, args).fetchone()[0]
     finally:
         conn.close()
-    return row[0] if row else 0
+
 
 
 def mark_notifications_read(ids=None):

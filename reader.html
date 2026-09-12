@@ -584,7 +584,10 @@
       <button class="back-btn" id="backBtn" style="display:none" aria-label="返回">‹</button>
     </div>
     <div class="stat-bar">
-      <span class="stat-item">今日 <b id="todayDone">0</b> 张 · 连击 <b id="streakNum">0</b> 天</span>
+      <!-- 「连击天数」已下线（范围决策）：用连续天数施压会把学习变成打卡，
+           而且断一天就归零，衡量不出学进去多少。改成累计学习天数——
+           不施压、不归零，也不作为质量判断依据。 -->
+      <span class="stat-item">今日 <b id="todayDone">0</b> 张 · 累计学习 <b id="studyDays">0</b> 天</span>
       <button class="review-btn tint" id="notifBtn" style="display:none"><span class="ic-svg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 9a6 6 0 1 0-12 0c0 4.5-2 5.8-2 5.8h16s-2-1.3-2-5.8z"/><path d="M10 19a2.2 2.2 0 0 0 4 0"/></svg></span> <b id="notifCount">0</b></button>
       <button class="review-btn tint-green" id="qcBtn"><span class="ic-svg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 2.8V11c0 4.6-3.1 7.6-7 9-3.9-1.4-7-4.4-7-9V5.8L12 3z"/><path d="M9 12l2.2 2.2L15.5 9.5"/></svg></span> 质检</button>
       <button class="review-btn danger" id="reviewBtn" style="display:none">待复习 <b id="reviewCount">0</b></button>
@@ -824,7 +827,7 @@
       var raw = localStorage.getItem(STORAGE_KEY);
       if (raw) return JSON.parse(raw);
     } catch (e) {}
-    return { completed: {}, streak: 0, last_active_date: null };
+    return { completed: {}, last_active_date: null };
   }
 
   function saveWeizhiState() {
@@ -833,7 +836,6 @@
 
   var ws = loadWeizhiState();
   if (!ws.completed || typeof ws.completed !== 'object') ws.completed = {};
-  ws.streak = ws.streak || 0;
   var serverDone = null; // 服务器 progress 表（今日完成数以此为准确）
 
   function todayStr() {
@@ -843,13 +845,6 @@
     return d.getFullYear() + '-' + m + '-' + day;
   }
 
-  function yesterdayStr() {
-    var d = new Date();
-    d.setDate(d.getDate() - 1);
-    var m = d.getMonth() + 1; if (m < 10) m = '0' + m;
-    var day = d.getDate(); if (day < 10) day = '0' + day;
-    return d.getFullYear() + '-' + m + '-' + day;
-  }
 
   function cardId(c) { return c.source_url || c.title || ''; }
 
@@ -872,21 +867,17 @@
     if (ws.completed[today].indexOf(id) !== -1) return; // 已记过，不重复
     ws.completed[today].push(id);
     if (ws.last_active_date !== today) {
-      // 连续判断：上次活跃是昨天 → +1；断签（隔了 ≥1 天）→ 重置为 1
-      ws.streak = (ws.last_active_date === yesterdayStr()) ? ((ws.streak || 0) + 1) : 1;
-      ws.last_active_date = today;
+      ws.last_active_date = today;   // 只用于记录"今天来过"，不再累计连续天数
     }
     saveWeizhiState();
     renderStats();
     // 同步到服务器（失败静默，本地缓存已保留）
     postDone(c, today);
-    postState('streak', ws.streak);
     postState('last_active_date', ws.last_active_date);
   }
 
   function renderStats() {
     var today = todayStr();
-    $('streakNum').textContent = ws.streak || 0;
     // 今日完成以服务器 progress 表为准（serverDone），避免 localStorage 累积漂移
     var doneToday = 0;
     if (serverDone && serverDone[today]) {
@@ -895,6 +886,18 @@
       doneToday = ws.completed[today].length;
     }
     $('todayDone').textContent = doneToday;
+    // 累计学习天数 = 有学习记录的天数（不是连续天数）
+    var days = 0;
+    if (serverDone) {
+      for (var d in serverDone) {
+        if (serverDone[d] && serverDone[d].length) days++;
+      }
+    } else if (ws.completed) {
+      for (var d2 in ws.completed) {
+        if (ws.completed[d2] && ws.completed[d2].length) days++;
+      }
+    }
+    $('studyDays').textContent = days;
   }
 
   // ---------- 服务器状态同步（localStorage 作缓存/降级，服务器为准） ----------
@@ -942,10 +945,6 @@
       }
     }
     var us = data.user_state || {};
-    if (us.streak !== undefined && us.streak !== null) {
-      // 取更大的连击，避免单设备重置误覆盖本地进度
-      ws.streak = Math.max(ws.streak || 0, parseInt(us.streak, 10) || 0);
-    }
     if (us.last_active_date) {
       ws.last_active_date = us.last_active_date;
     }
@@ -1057,6 +1056,15 @@
     { key: 'try_it',         title: '今天就试',       kind: 'prose' },
     { key: 'etymology',      title: '词源拆解',       kind: 'prose' },
   ];
+
+  // 内容块字段 → 中文标题。标题只有一个来源（CARD_BLOCKS）；
+  // 找不到就退回字段名，而不是猜一个——猜错会掩盖两处清单漂移。
+  function blockTitle(field) {
+    for (var i = 0; i < CARD_BLOCKS.length; i++) {
+      if (CARD_BLOCKS[i].key === field) return CARD_BLOCKS[i].title || field;
+    }
+    return field;
+  }
 
   function _section(title, inner) {
     if (!title) return '<div class="section">' + inner + '</div>';
@@ -2617,11 +2625,13 @@
         '<div class="stat-cell"><div class="stat-cell-num">' + (s.mastered || 0) + '</div><div class="stat-cell-label">已掌握</div></div>' +
         '<div class="stat-cell"><div class="stat-cell-num">' + acc + '</div><div class="stat-cell-label">复习准确率</div></div>' +
         '</div>';
-      var tpls = d.template_dist || [];
-      if (tpls.length) {
-        var tmax = tpls[0].count;
-        html += '<div style="margin:12px 0 2px;font-size:12px;color:var(--text-3)">模板分布</div>' +
-          tpls.map(function (t) { return dashBar(t.name, t.count, tmax, '#3D8A5A'); }).join('');
+      // 内容块分布（取代模板分布）：类型已从界面下线，
+      // "我的卡片里有多少带代码/带步骤/带例子"才是用户能拿来判断的事
+      var blks = d.block_dist || [];
+      if (blks.length) {
+        var bmax = blks[0].count;
+        html += '<div style="margin:12px 0 2px;font-size:12px;color:var(--text-3)">内容块分布</div>' +
+          blks.map(function (b) { return dashBar(blockTitle(b.name), b.count, bmax, '#3D8A5A'); }).join('');
       }
       html += '</div>';
       // 2. 质量趋势
@@ -2702,7 +2712,7 @@
       ['复习完成', pct(m.compliance_today)],
       ['复习正确率', pct(m.accuracy_today)],
       ['掌握率', pct(m.mastery_rate)],
-      ['连击', m.streak || '-'],
+      ['累计学习天数', m.study_days != null ? m.study_days : '-'],
       ['待复习', m.due_today != null ? m.due_today : '-']
     ];
     $('qcMetrics').innerHTML = '<div class="qc-metrics-grid">' + cells.map(function (c) {
