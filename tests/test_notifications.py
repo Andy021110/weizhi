@@ -1,9 +1,14 @@
 # -*- coding: utf-8 -*-
-"""CP23 测试：通知策略（只允许三类）。
+"""CP23 测试：通知策略（只允许三类）+ CP27 通知范围（默认只看今天）。
 
 范围决策要求通知精简到：到期复习 / 需要用户审核 / 系统任务失败且无法自动恢复，
 其余七类取消。这一层是唯一的口子，所以测试也集中在这里。
+
+CP27 补的是「看哪一段」：历史通知攒着不清会把今天该做的事淹掉，
+所以默认只看今天，历史留一个入口。
 """
+from datetime import datetime
+
 import pytest
 
 import daily_agent
@@ -148,3 +153,75 @@ def test_metrics_report_study_days_not_streak(tmp_db):
     m = daily_check.usage_metrics()
     assert "study_days" in m
     assert "streak" not in m
+
+
+# ---------- CP27 通知范围：默认只看今天 ----------
+
+def _today():
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def test_scope_defaults_to_today():
+    scope, since = reader.notification_scope({})
+    assert scope == "today" and since == _today()
+
+
+def test_scope_all_has_no_date_floor():
+    assert reader.notification_scope({"scope": ["all"]}) == ("all", None)
+
+
+@pytest.mark.parametrize("bad", ["al", "ALL", "", "yesterday"])
+def test_scope_treats_unknown_value_as_today(bad):
+    """拼错/大小写不对的参数不能静默变成「全部」——那又把历史糊回脸上。"""
+    assert reader.notification_scope({"scope": [bad]})[0] == "today"
+
+
+def test_list_notifications_since_date_excludes_history(tmp_db):
+    N.emit("review_due", "历史一", "正文", level="warn", date="2026-01-01")
+    N.emit("review_due", "历史二", "正文", level="warn", date="2026-01-02")
+    N.emit("review_due", "今天的", "正文", level="warn")
+
+    assert [n["title"] for n in db.list_notifications(since_date=_today())] == ["今天的"]
+    # 不传就是全部 —— 历史没被删，只是不再默认展示
+    assert len(db.list_notifications()) == 3
+    assert len(db.list_notifications(since_date=None)) == 3
+
+
+def test_unread_count_shares_scope_with_list(tmp_db):
+    """口径必须一致，否则徽标显示 3 条未读、点进去一条都没有。"""
+    for i in range(3):
+        N.emit("review_due", "历史%d" % i, "正文", level="warn", date="2026-01-0%d" % (i + 1))
+    N.emit("review_due", "今天的", "正文", level="warn")
+
+    assert db.count_unread_notifications(since_date=_today()) == 1
+    assert db.count_unread_notifications() == 4
+    listed = db.list_notifications(unread_only=True, since_date=_today())
+    assert len(listed) == db.count_unread_notifications(since_date=_today())
+
+
+def test_today_scope_is_empty_when_only_history(tmp_db):
+    """只有历史时，今天这一栏要如实为空，而不是把旧的顶上来。"""
+    N.emit("review_due", "历史", "正文", level="warn", date="2026-01-01")
+    assert db.list_notifications(since_date=_today()) == []
+    assert db.count_unread_notifications(since_date=_today()) == 0
+    assert len(db.list_notifications(since_date=None)) == 1
+
+
+def test_scope_does_not_bypass_type_whitelist(tmp_db):
+    """范围过滤和类型白名单是两道独立的门，不能互相绕过。"""
+    N.emit("review_due", "允许的", "正文", level="warn")
+    N.emit("streak_warn", "已停发的类型", "正文", level="warn")   # 被白名单拦下
+    rows = db.list_notifications(types=sorted(N.KEEP), since_date=_today())
+    assert [n["type"] for n in rows] == ["review_due"]
+
+
+def test_read_all_scoped_to_visible_ids(tmp_db):
+    """「全部标为已读」只标当前看到的那一段，否则回头翻历史全是已读。"""
+    N.emit("review_due", "历史", "正文", level="warn", date="2026-01-01")
+    N.emit("review_due", "今天的", "正文", level="warn")
+
+    visible = db.list_notifications(since_date=_today())
+    db.mark_notifications_read([n["id"] for n in visible])
+
+    assert db.count_unread_notifications(since_date=_today()) == 0
+    assert db.count_unread_notifications(since_date=None) == 1   # 历史仍是未读

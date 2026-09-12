@@ -667,6 +667,7 @@
       <div class="create-hint" id="notifHint"></div>
       <div id="notifList"></div>
       <button class="create-cancel" id="notifReadAll" style="margin-top:12px">全部标为已读</button>
+      <button class="create-cancel" id="notifScopeBtn" data-scope="all" style="margin-top:6px">查看历史通知</button>
       <button class="create-cancel" id="notifClose" style="margin-top:6px">关闭</button>
     </div>
   </div>
@@ -3024,51 +3025,72 @@
   }
 
   // ---------- M3 管家通知（程序内推送） ----------
-  function openNotifCenter() {
+  // 通知中心默认只看今天。历史通知攒着不清会把「今天要做什么」淹掉——
+  // 打开就是几十条旧消息，久了就学会整个无视。历史没被删，下面有入口。
+  function openNotifCenter(scope) {
+    // 无参 = 回到默认（今天）：点铃铛不该停在上次翻到的历史页。
+    var notifScope = (scope === 'all') ? 'all' : 'today';
+    var isAll = notifScope === 'all';
     $('notifOverlay').style.display = 'flex';
-    fetchJSON('/api/notifications').then(function (data) {
+    fetchJSON('/api/notifications?scope=' + notifScope).then(function (data) {
       var list = data.notifications || [];
       var unread = data.unread_count || 0;
-      $('notifHint').textContent = unread ? unread + ' 条未读，点未读项标记已读' : '没有未读通知';
-      if (!list.length) { $('notifList').innerHTML = '<div class="qc-none">暂无通知</div>'; return; }
-      $('notifList').innerHTML = list.map(function (n) {
-        var lv = n.level === 'action' ? ' style="color:var(--red)"' : (n.level === 'warn' ? ' style="color:var(--accent)"' : '');
-        var go = n.type === 'badcase_pending' ? ' data-goto="qc"' : '';
-        return '<div class="notif-item' + (n.read ? '' : ' unread') + '" data-id="' + n.id + '"' + go + '>' +
-          '<div class="notif-head"><b' + lv + '>' + escapeHtml(n.title || '') + '</b><span class="notif-date">' + escapeHtml(n.date || '') + '</span></div>' +
-          '<div class="notif-body">' + escapeHtml(n.body || '') + (n.type === 'badcase_pending' ? '<span class="notif-go">查看并处理 →</span>' : '') + '</div>' +
-        '</div>';
-      }).join('');
-      var items = $('notifList').querySelectorAll('.notif-item.unread');
-      for (var i = 0; i < items.length; i++) {
-        items[i].addEventListener('click', function () {
-          var id = parseInt(this.getAttribute('data-id'), 10);
-          var el = this;
-          var gotoQc = this.getAttribute('data-goto') === 'qc';
-          postJSON('/api/notifications/read', { ids: [id] }).then(function () {
-            el.classList.remove('unread');
-            refreshNotifBadge();
-          }).catch(function () {});
-          // badcase 通知：标已读后直达质检报告（手机上直接能看 badcase 并处理）
-          if (gotoQc) {
-            $('notifOverlay').style.display = 'none';
-            openQcReport();
-          }
-        });
+      // 提示要说清「现在看的是哪一段」，否则用户会以为通知就这么几条
+      $('notifHint').textContent = isAll
+        ? (unread ? '全部历史 · ' + unread + ' 条未读' : '全部历史通知')
+        : (unread ? '今天 ' + unread + ' 条未读，点未读项标记已读' : '今天没有未读');
+      if (!list.length) {
+        $('notifList').innerHTML = '<div class="qc-none">'
+          + (isAll ? '暂无通知' : '今天还没有通知') + '</div>';
+      } else {
+        $('notifList').innerHTML = list.map(function (n) {
+          var lv = n.level === 'action' ? ' style="color:var(--red)"' : (n.level === 'warn' ? ' style="color:var(--accent)"' : '');
+          var go = n.type === 'badcase_pending' ? ' data-goto="qc"' : '';
+          return '<div class="notif-item' + (n.read ? '' : ' unread') + '" data-id="' + n.id + '"' + go + '>' +
+            '<div class="notif-head"><b' + lv + '>' + escapeHtml(n.title || '') + '</b><span class="notif-date">' + escapeHtml(n.date || '') + '</span></div>' +
+            '<div class="notif-body">' + escapeHtml(n.body || '') + (n.type === 'badcase_pending' ? '<span class="notif-go">查看并处理 →</span>' : '') + '</div>' +
+          '</div>';
+        }).join('');
+        var items = $('notifList').querySelectorAll('.notif-item.unread');
+        for (var i = 0; i < items.length; i++) {
+          items[i].addEventListener('click', function () {
+            var id = parseInt(this.getAttribute('data-id'), 10);
+            var el = this;
+            var gotoQc = this.getAttribute('data-goto') === 'qc';
+            postJSON('/api/notifications/read', { ids: [id] }).then(function () {
+              el.classList.remove('unread');
+              refreshNotifBadge();
+            }).catch(function () {});
+            // badcase 通知：标已读后直达质检报告（手机上直接能看 badcase 并处理）
+            if (gotoQc) {
+              $('notifOverlay').style.display = 'none';
+              openQcReport();
+            }
+          });
+        }
       }
+      // 切换按钮的文案跟着当前范围走，别让用户猜点了会发生什么
+      $('notifScopeBtn').textContent = isAll ? '只看今天' : '查看历史通知';
+      $('notifScopeBtn').setAttribute('data-scope', isAll ? 'today' : 'all');
     }).catch(function () {});
   }
 
   function refreshNotifBadge() {
-    fetchJSON('/api/notifications?unread=1').then(function (data) {
-      var n = (data.notifications || []).length;
+    fetchJSON('/api/notifications').then(function (data) {
+      var n = data.unread_count || 0;
+      // 铃铛是「通知中心」的入口，不是未读计数器——常驻显示，只有真有未读时
+      // 才把数字亮出来。之前「没未读就藏起来」有个坑：今天没有未读时，
+      // 用户想翻历史通知会发现根本没地方进去。
+      $('notifBtn').style.display = 'inline-block';
       $('notifCount').textContent = n;
-      $('notifBtn').style.display = n ? 'inline-block' : 'none';
+      $('notifCount').style.display = n ? 'inline' : 'none';
     }).catch(function () {});
   }
 
   function maybePopNotif() {
-    // 有「新」通知才自动弹出（localStorage 记录已看过的最大 id，避免每次刷新都弹）
+    // 只看**今天**的未读（`/api/notifications` 默认就是今天）。
+    // 历史通知攒着没处理，不该让用户每次打开都被弹一次——弹窗是提醒，
+    // 提醒只对今天的事有意义。同一批通知只弹一次，靠 localStorage 记最大 id。
     fetchJSON('/api/notifications?unread=1').then(function (data) {
       var list = data.notifications || [];
       var seen = 0;
@@ -3076,11 +3098,10 @@
       var newest = 0;
       for (var i = 0; i < list.length; i++) if (list[i].id > newest) newest = list[i].id;
       if (list.length && newest > seen) {
-        openNotifCenter();
+        openNotifCenter('today');
         try { localStorage.setItem('weizhi_notif_seen', String(newest)); } catch (e) {}
       }
-      $('notifCount').textContent = list.length;
-      $('notifBtn').style.display = list.length ? 'inline-block' : 'none';
+      refreshNotifBadge();
     }).catch(function () {});
   }
 
@@ -3208,18 +3229,26 @@
   $('qcOverlay').addEventListener('click', function (e) {
     if (e.target === $('qcOverlay')) $('qcOverlay').style.display = 'none';
   });
-  $('notifBtn').addEventListener('click', openNotifCenter);
+  // 显式包一层：直接挂函数会把 click 事件对象当成 scope 传进去
+  $('notifBtn').addEventListener('click', function () { openNotifCenter('today'); });
   $('notifClose').addEventListener('click', function () { $('notifOverlay').style.display = 'none'; });
   $('notifOverlay').addEventListener('click', function (e) {
     if (e.target === $('notifOverlay')) $('notifOverlay').style.display = 'none';
   });
   $('notifReadAll').addEventListener('click', function () {
-    postJSON('/api/notifications/read', {}).then(function () {
-      var items = $('notifList').querySelectorAll('.notif-item');
-      for (var i = 0; i < items.length; i++) items[i].classList.remove('unread');
-      $('notifHint').textContent = '已全部读完';
+    // 只标「当前看到的这一段」。看今天却顺手把历史也标掉的话，
+    // 用户回头翻历史会全是已读，分不出哪些是真处理过的。
+    var items = $('notifList').querySelectorAll('.notif-item');
+    var ids = [];
+    for (var i = 0; i < items.length; i++) ids.push(parseInt(items[i].getAttribute('data-id'), 10));
+    postJSON('/api/notifications/read', { ids: ids }).then(function () {
+      for (var j = 0; j < items.length; j++) items[j].classList.remove('unread');
+      $('notifHint').textContent = '已读完';
       refreshNotifBadge();
     }).catch(function () {});
+  });
+  $('notifScopeBtn').addEventListener('click', function () {
+    openNotifCenter(this.getAttribute('data-scope') || 'all');
   });
   var searchTimer = null;
   $('searchInput').addEventListener('input', function () {

@@ -195,6 +195,22 @@ def _load_reports(days=7):
     return reports
 
 
+def notification_scope(qs):
+    """解析通知的范围参数，返回 (scope, since_date)。
+
+    默认 `today`：历史通知攒着不清会把「今天要做什么」淹掉——打开就是
+    几十条旧消息，久了就学会整个无视徽标。历史没有被删，`scope=all`
+    就能翻到，只是不再默认糊在脸上。
+
+    除 `all` 以外的一律按 today 处理（拼错的参数不该静默变成「全部」）。
+    """
+    scope = (qs.get("scope") or ["today"])[0]
+    if scope != "all":
+        scope = "today"
+    since = None if scope == "all" else datetime.now().strftime("%Y-%m-%d")
+    return scope, since
+
+
 def build_discover(limit=3):
     """发现层：把「不再推送」的内容归到一处，由用户主动来逛。
 
@@ -1103,13 +1119,18 @@ class ReaderHandler(BaseHTTPRequestHandler):
 
         if path == "/api/notifications":
             unread = (qs.get("unread") or ["0"])[0] in ("1", "true")
-            # 只放行三类通知（范围决策）。列表与未读数用同一份类型白名单，
+            # 范围：默认只看今天。历史通知攒着不清会把「今天要做什么」淹掉——
+            # 打开就是一堆旧消息，久了就学会无视徽标。历史没有消失，
+            # scope=all 就能看到，只是不再默认糊在脸上。
+            scope, since = notification_scope(qs)
+            # 只放行三类通知（范围决策）。列表、未读数、范围共用同一份口径，
             # 否则徽标会显示一堆点进去看不到的通知。
             kinds = sorted(notifications.KEEP)
             self._send_json({
                 "notifications": db.list_notifications(
-                    limit=50, unread_only=unread, types=kinds),
-                "unread_count": db.count_unread_notifications(types=kinds),
+                    limit=50, unread_only=unread, types=kinds, since_date=since),
+                "unread_count": db.count_unread_notifications(types=kinds, since_date=since),
+                "scope": scope,
             })
             return
 

@@ -1488,12 +1488,13 @@ def add_notification(n_type, title, body, level="info", date=None):
         conn.close()
 
 
-def list_notifications(limit=50, unread_only=False, types=None):
-    """通知列表，倒序。unread_only=True 只返回未读；types 限定类型。
+def list_notifications(limit=50, unread_only=False, types=None, since_date=None):
+    """通知列表，倒序。unread_only=True 只返回未读；types 限定类型；
+    since_date 限定「这一天及以后」（YYYY-MM-DD）。
 
     `types` 用来只放行允许的通知类型（见 notifications.KEEP）。
     在 SQL 里过滤而不是读出来再筛，是因为未读数也要用同一口径——
-    否则徽标会显示一堆点进去看不到的通知。
+    否则徽标会显示一堆点进去看不到的通知。`since_date` 同理。
     """
     where, args = [], []
     if unread_only:
@@ -1501,6 +1502,9 @@ def list_notifications(limit=50, unread_only=False, types=None):
     if types:
         where.append("type IN (%s)" % ",".join("?" * len(types)))
         args.extend(types)
+    if since_date:
+        where.append("date >= ?")
+        args.append(since_date)
     sql = "SELECT * FROM notifications"
     if where:
         sql += " WHERE " + " AND ".join(where)
@@ -1514,13 +1518,17 @@ def list_notifications(limit=50, unread_only=False, types=None):
     return [dict(r) for r in rows]
 
 
-def count_unread_notifications(types=None):
-    """未读数。`types` 与 list_notifications 用同一口径，否则徽标会对不上。"""
+def count_unread_notifications(types=None, since_date=None):
+    """未读数。`types` / `since_date` 与 list_notifications 用同一口径，
+    否则徽标会对不上——显示 3 条未读、点进去一条都没有。"""
     sql = "SELECT COUNT(*) FROM notifications WHERE read = 0"
     args = []
     if types:
         sql += " AND type IN (%s)" % ",".join("?" * len(types))
         args.extend(types)
+    if since_date:
+        sql += " AND date >= ?"
+        args.append(since_date)
     conn = _conn()
     try:
         return conn.execute(sql, args).fetchone()[0]
