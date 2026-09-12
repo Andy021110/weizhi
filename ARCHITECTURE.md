@@ -1,6 +1,10 @@
 # 微知 WeiZhi · 系统架构
 
 > 更新：2026-09-12 · 与代码同步的架构快照
+>
+> 系统结构图的源文件是 `docs/assets/readme/architecture.spec.json`（用 [archify](https://github.com/tt-a1i/archify) 渲染）。
+> 架构变了改 spec 重渲，**不要手改** `docs/assets/readme/architecture.png`——
+> 手画的图不会报错，只会静默过期。
 
 ## 1. 总览
 

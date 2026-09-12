@@ -107,6 +107,8 @@ Call auditing started on 09-11: 75 calls, 194k input tokens, 42k output tokens, 
 
 ![Architecture](docs/assets/readme/architecture.png)
 
+The diagram is generated from [architecture.spec.json](docs/assets/readme/architecture.spec.json): edit the spec and re-render it. Hand-edited images go stale without telling anyone.
+
 The directory follows the same four layers, and code is kept separate from data:
 
 ```

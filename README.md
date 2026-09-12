@@ -107,6 +107,8 @@ http://47.76.25.13/?key=WeiZhi-Demo-ReadOnly-4t8m
 
 ![系统结构](docs/assets/readme/architecture.png)
 
+图的源文件是 [architecture.spec.json](docs/assets/readme/architecture.spec.json)：改了架构就改它重渲，别手改图片——手画的图会静默过期。
+
 目录也按这四层分，代码和数据是分开的：
 
 ```

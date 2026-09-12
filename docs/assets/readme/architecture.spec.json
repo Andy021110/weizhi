@@ -1,0 +1,330 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "微知 WeiZhi · 系统结构",
+    "subtitle": "一台 2C2G 服务器 · 五个进程互不阻塞 · 代码分四层，数据留在部署根目录",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "animation": "none",
+    "views": [
+      {
+        "id": "produce-path",
+        "label": "产卡链路",
+        "focus": [
+          "sources",
+          "pool",
+          "claims",
+          "writer",
+          "gate",
+          "db"
+        ],
+        "note": "从 8 个信源到一张能追回原文的卡：先确定性抽事实，再受约束写作，过了门禁才入库。"
+      },
+      {
+        "id": "read-and-review",
+        "label": "读到与记住",
+        "focus": [
+          "pwa",
+          "reader",
+          "review",
+          "db"
+        ],
+        "note": "卡片出库、阅读、作答、按 SM-2 排下一次复习。写操作在服务端被限制。"
+      },
+      {
+        "id": "night-shift",
+        "label": "凌晨自己跑的",
+        "focus": [
+          "check",
+          "agent",
+          "shadow",
+          "llm"
+        ],
+        "note": "巡检打分、管家决策、影子对照。只产出修订候选，采纳与否由人决定。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "sources",
+      "type": "external",
+      "label": "8 个信源",
+      "sublabel": "官方 / 论文 / 媒体",
+      "tag": "ETag 增量",
+      "row": 0,
+      "col": 1
+    },
+    {
+      "id": "pool",
+      "type": "backend",
+      "label": "候选池",
+      "sublabel": "程序筛 → 模型筛",
+      "row": 0,
+      "col": 2
+    },
+    {
+      "id": "claims",
+      "type": "backend",
+      "label": "证据抽取",
+      "sublabel": "确定性，不编造",
+      "tag": "v2_claims",
+      "row": 0,
+      "col": 3
+    },
+    {
+      "id": "writer",
+      "type": "backend",
+      "label": "受约束写作",
+      "sublabel": "只喂已定位事实",
+      "tag": "逐段标引用",
+      "row": 0,
+      "col": 4
+    },
+    {
+      "id": "gate",
+      "type": "security",
+      "label": "写作门禁",
+      "sublabel": "长度 / 结构 / 密度",
+      "row": 0,
+      "col": 5
+    },
+    {
+      "id": "pwa",
+      "type": "frontend",
+      "label": "单文件 PWA",
+      "sublabel": "reader.html",
+      "row": 2,
+      "col": 1
+    },
+    {
+      "id": "reader",
+      "type": "backend",
+      "label": "HTTP 服务",
+      "sublabel": ":8000",
+      "tag": "读写分权",
+      "row": 2,
+      "col": 2
+    },
+    {
+      "id": "review",
+      "type": "backend",
+      "label": "复习流程",
+      "sublabel": "SM-2 · 服务端判分",
+      "row": 2,
+      "col": 3
+    },
+    {
+      "id": "check",
+      "type": "backend",
+      "label": "巡检打分",
+      "sublabel": "daily_check",
+      "tag": "3:30",
+      "row": 4,
+      "col": 1
+    },
+    {
+      "id": "agent",
+      "type": "backend",
+      "label": "管家决策",
+      "sublabel": "daily_agent",
+      "tag": "3:35",
+      "row": 4,
+      "col": 2
+    },
+    {
+      "id": "shadow",
+      "type": "backend",
+      "label": "影子链路",
+      "sublabel": "v2_shadow",
+      "tag": "4:00",
+      "row": 4,
+      "col": 3
+    },
+    {
+      "id": "db",
+      "type": "database",
+      "label": "weizhi.db",
+      "sublabel": "SQLite · 18 张表",
+      "row": 2,
+      "col": 5
+    },
+    {
+      "id": "llm",
+      "type": "cloud",
+      "label": "DeepSeek",
+      "sublabel": "providers.py 出口",
+      "row": 2,
+      "col": 0
+    }
+  ],
+  "layout": {
+    "mode": "grid",
+    "cols": 6,
+    "cellW": 132,
+    "cellH": 78,
+    "gapX": 18,
+    "gapY": 30
+  },
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "produce/ 采集与产卡 · cron 6:00 / 18:00",
+      "wraps": [
+        "sources",
+        "pool",
+        "claims",
+        "writer",
+        "gate"
+      ],
+      "pad": 20
+    },
+    {
+      "kind": "region",
+      "label": "serve/ 阅读与复习 · systemd 常驻",
+      "wraps": [
+        "pwa",
+        "reader",
+        "review"
+      ],
+      "pad": 20
+    },
+    {
+      "kind": "region",
+      "label": "ops/ 质量与编排 · cron 3:30 / 3:35 / 4:00",
+      "wraps": [
+        "check",
+        "agent",
+        "shadow"
+      ],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "id": "sources-pool",
+      "from": "sources",
+      "to": "pool",
+      "variant": "emphasis"
+    },
+    {
+      "id": "pool-claims",
+      "from": "pool",
+      "to": "claims"
+    },
+    {
+      "id": "claims-writer",
+      "from": "claims",
+      "to": "writer"
+    },
+    {
+      "id": "writer-gate",
+      "from": "writer",
+      "to": "gate"
+    },
+    {
+      "id": "gate-db",
+      "from": "gate",
+      "to": "db",
+      "variant": "emphasis",
+      "label": "过门禁才入库",
+      "labelAt": [
+        856,
+        181
+      ]
+    },
+    {
+      "id": "review-db",
+      "from": "review",
+      "to": "db",
+      "label": "掌握度与排期",
+      "labelDy": -16
+    },
+    {
+      "id": "pwa-reader",
+      "from": "pwa",
+      "to": "reader"
+    },
+    {
+      "id": "reader-review",
+      "from": "reader",
+      "to": "review"
+    },
+    {
+      "id": "pool-llm",
+      "from": "pool",
+      "to": "llm",
+      "label": "模型筛",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "writer-llm",
+      "from": "writer",
+      "to": "llm",
+      "label": "受约束写作",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDx": 80
+    },
+    {
+      "id": "check-llm",
+      "from": "check",
+      "to": "llm",
+      "label": "巡检打分",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "bottom"
+    },
+    {
+      "id": "agent-llm",
+      "from": "agent",
+      "to": "llm",
+      "label": "管家决策",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "bottom",
+      "labelDx": -64
+    },
+    {
+      "id": "shadow-llm",
+      "from": "shadow",
+      "to": "llm",
+      "label": "影子对照",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "bottom"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "产卡为什么要绕一圈",
+      "items": [
+        "先确定性抽事实，再受约束写作，正文逐段标引用编号",
+        "抽不出 2 条以上事实的材料，直接不产卡",
+        "两级筛选：能算的交给程序，值不值得读交给模型"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "读写分权",
+      "items": [
+        "主人口令可写；只读演示口令在服务端被拒一切写操作",
+        "写锁放在统一入口，新增接口不会漏判",
+        "演示角色看得到数据，改不动数据"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "已知不足",
+      "items": [
+        "调用审计只覆盖走统一出口的调用，巡检与管家是直连",
+        "成功标准还没埋点：能证明卡被读了，证明不了判断变了",
+        "候选池小时排序会系统性挤掉深度源"
+      ]
+    }
+  ]
+}
