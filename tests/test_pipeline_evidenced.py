@@ -187,7 +187,7 @@ def test_pipeline_report_written(tmp_db):
 # ---------- 默认路径必须是证据链路 ----------
 
 def test_default_path_is_evidenced_not_legacy():
-    """旧路径只能出现在 --legacy 分支里。默认走老路径 = 改造失效。
+    """旧路径只能出现在 --legacy 分支里。默认走老路径 = 证据化失效。
 
     这条用源码断言是刻意的：接线错误不会让任何测试变红，
     只会让线上悄悄退回「整篇塞 prompt」。
@@ -195,17 +195,20 @@ def test_default_path_is_evidenced_not_legacy():
     path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         "pipeline.py")
     src = open(path, encoding="utf-8").read()
-    body = src.split("def main(")[1]
-    assert "if args.legacy:" in body
 
-    legacy_at = body.index("if args.legacy:")
-    else_at = body.index("else:", legacy_at)
-    legacy_branch = body[legacy_at:else_at]
-    default_branch = body[else_at:]
+    # main 的默认分支走 _run_pick（候选筛选）
+    main_body = src.split("def main(")[1]
+    assert "if args.legacy:" in main_body
+    default_branch = main_body.split("if args.legacy:")[1].split("else:")[1]
+    assert "_run_pick" in default_branch
 
-    assert "generate_card_evidenced" in default_branch
-    assert "generate_card(" not in default_branch.replace("generate_card_evidenced", "")
-    assert "generate_card(" in legacy_branch
+    # _run_pick 走证据链路
+    pick_body = src.split("def _run_pick(")[1].split("\ndef _run_legacy")[0]
+    assert "generate_card_evidenced" in pick_body
+    assert "generate_card(" not in pick_body.replace("generate_card_evidenced", "")
+
+    # 旧路径只出现在 _run_legacy 里
+    assert "generate_card(" in src.split("def _run_legacy(")[1]
 
 
 def test_main_initializes_db_itself():

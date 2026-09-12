@@ -20,7 +20,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import feedparser
 import trafilatura
@@ -45,8 +45,24 @@ def load_config():
         return json.load(f)
 
 
+def _entry_published(entry):
+    """RSS 条目的发布时间（ISO 字符串）。拿不到时返回 None。
+
+    为什么必须有：时效窗口靠它判断。没有发布时间的条目只能按「刚抓到」算，
+    那会把一篇三周前的置顶文章当成今天的新闻——这正是「过时卡」的来源。
+    """
+    for key in ("published_parsed", "updated_parsed"):
+        t = getattr(entry, key, None)
+        if t:
+            try:
+                return datetime(*t[:6]).isoformat()
+            except (TypeError, ValueError):
+                pass
+    return None
+
+
 def fetch_rss(source, limit=None):
-    """抓取一个 RSS 源，返回文章列表 [{title, url, summary}]。
+    """抓取一个 RSS 源，返回文章列表 [{title, url, summary, published}]。
     B1 条件请求：带 ETag/Last-Modified，304 直接返回空（未更新）。
     B2 容错：失败重试 3 次，指数退避（0.5s/2s/8s）。"""
     key = re.sub(r"[^a-zA-Z0-9]+", "_", source["name"])
@@ -83,6 +99,7 @@ def fetch_rss(source, limit=None):
                     "title": getattr(e, "title", "").strip(),
                     "url": getattr(e, "link", "").strip(),
                     "summary": getattr(e, "summary", "") or getattr(e, "description", ""),
+                    "published": _entry_published(e),
                 })
             return articles
         except urllib.error.HTTPError as e:
@@ -205,6 +222,222 @@ def generate_card(client, source, article, template):
     return card
 
 
+# ===== 来源分级 =====
+#
+# `news.py` 早就定义了 7 档 SOURCE_TIERS，`bridge_v1.CREDIBILITY` 也有
+# 档位到标签的映射，但两条产卡路径都没接线：v1 让模型看着正文猜权威度，
+# v2 写死 "source_tier": "blog"。结果是 arXiv 论文的卡和一条二手解读
+# 标着同一个「专业博客」。
+#
+# 这里按**域名**解析级别，而不要求 config 里必须有 tier：已有部署的
+# config.json 只有 {name, rss, category}，内置默认表让它们不改配置
+# 就立刻用上分级；config 里显式写了 tier 则以 config 为准。
+SOURCE_TIER_BY_DOMAIN = {
+    "openai.com": "official",
+    "anthropic.com": "official",
+    "deepmind.google": "official",
+    "blog.google": "official",
+    "ai.meta.com": "official",
+    "microsoft.com": "official",
+    "apple.com": "official",
+    "arxiv.org": "paper",
+    "rss.arxiv.org": "paper",
+    "huggingface.co": "primary",
+    "github.com": "primary",
+    "qbitai.com": "media",
+    "jiqizhixin.com": "media",
+    "importai.substack.com": "analyst",
+    "magazine.sebastianraschka.com": "analyst",
+    "baoyu.io": "blog",
+    "ruanyifeng.com": "blog",
+}
+
+
+def resolve_tier(src):
+    """源的级别：config 显式 > 域名默认 > blog。
+
+    兜底用 blog 而不是 official：判不出来时**宁可低估**——
+    把二手内容标成一手，比反过来危险得多。
+    """
+    import news
+    t = (src.get("tier") or "").strip().lower()
+    if t and t in news.SOURCE_TIERS:
+        return t
+    m = re.search(r"https?://([^/]+)", src.get("rss") or "")
+    host = (m.group(1) if m else "").lower().split(":")[0]
+    for dom, tier in SOURCE_TIER_BY_DOMAIN.items():
+        if host == dom or host.endswith("." + dom):
+            return tier
+    return "blog"
+
+
+def _source_id(src):
+    """源的稳定 id。用域名而不是名称——名称会改，域名不会。"""
+    m = re.search(r"https?://([^/]+)", src.get("rss") or "")
+    host = (m.group(1) if m else "unknown").lower().split(":")[0]
+    return re.sub(r"[^a-z0-9]+", "-", host).strip("-") or "unknown"
+
+
+def _tier_of(source):
+    """源的级别：候选自带 source_tier 优先，否则按域名解析。
+
+    两条路径都要能走：主产线的候选在收集时已经解析过级别，
+    而按源调用时手上只有 config 里的源定义。
+    """
+    t = (source.get("source_tier") or source.get("tier") or "").strip().lower()
+    if t:
+        return t
+    return resolve_tier(source)
+
+
+# ===== 候选池与两级筛选 =====
+#
+# 为什么要把「抓」和「产卡」拆开：原来是「RSS 拉到什么就产什么」，
+# 等于让各个源的更新频率决定你今天读什么。候选池把「有什么」和「读什么」
+# 分开，中间才插得进筛选——这也是文章 workflow 质量更高的真正原因：
+# 它是「从 30 个候选里挑 2 篇」，不是「来几篇产几篇」。
+#
+# 两级分工：程序筛管**能算出来的**（时效、去重、级别），模型筛管
+# **算不出来的**（值不值得读）。前者不花钱，后者花一次调用。
+
+def collect_candidates(cfg, per_source=50, dry=False):
+    """从所有源抓候选。**不产卡**——产什么由筛选之后决定。
+
+    dry=True 时只算不记（--fetch-only 用）：避免「只是想看看有哪些源」
+    把增量指纹写掉，导致真正跑的时候这些文章被当成已见过。
+    """
+    out = []
+    for src in (cfg.get("sources") or []):
+        try:
+            articles = fetch_rss(src, limit=per_source)
+        except Exception as exc:  # noqa: BLE001
+            print(f"  ❌ 抓取失败：{exc}")
+            continue
+        if not articles:
+            print("  无更新")
+            continue
+        fresh = filter_fresh(articles, dry=dry)
+        print("  抓到 %d 篇，新增 %d 篇" % (len(articles), len(fresh)))
+        tier = resolve_tier(src)
+        for a in fresh:
+            url = a.get("url") or ""
+            if not url:
+                continue
+            out.append({
+                "id": hashlib.sha1(url.encode("utf-8")).hexdigest()[:12],
+                "source_id": _source_id(src),
+                "source_name": src.get("name") or "",
+                "source_tier": tier,
+                "topics": src.get("topics") or [],
+                "title": (a.get("title") or "").strip(),
+                "url": url,
+                "summary": a.get("summary") or "",
+                "published_at": a.get("published"),
+                "fetched_at": datetime.now().isoformat(),
+            })
+    return out
+
+
+def _parse_ts(s):
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(
+            str(s).replace("Z", "+00:00")[:26]).replace(tzinfo=None)
+    except (ValueError, TypeError):
+        return None
+
+
+def pretriage(candidates, hours=168, cap=30):
+    """程序筛：时效窗口 + 同题去重 + 按级别排序 + 限量。
+
+    先筛一遍再交给模型，不是为了省钱，是为了**判断质量**：
+    30 个候选和 300 个候选对模型是两回事，后者会让它只挑标题顺眼的。
+    """
+    import news
+    cutoff = datetime.now() - timedelta(hours=hours)
+    seen, fresh = set(), []
+    for c in candidates:
+        ts = _parse_ts(c.get("published_at"))
+        if ts and ts < cutoff:
+            continue                                  # 超出时效窗口
+        key = (c.get("title") or "").strip().lower()
+        if key and key in seen:
+            continue                                  # 同题跨源，保留先到的
+        if key:
+            seen.add(key)
+        fresh.append(c)
+
+    def _ts(c):
+        t = _parse_ts(c.get("published_at"))
+        return t.timestamp() if t else 0.0
+
+    # 一手来源优先；同级按时间倒序。时间缺失的排最后——
+    # 不能因为「不知道什么时候发的」就默认它很新。
+    fresh.sort(key=lambda c: (news.SOURCE_TIERS.get(c.get("source_tier"),
+                                                    news.DEFAULT_TIER), -_ts(c)))
+    return fresh[:cap]
+
+
+def _validate_rank(data):
+    if not isinstance(data, dict):
+        return ["应为 JSON 对象"]
+    picks = data.get("picks")
+    if not isinstance(picks, list):
+        return ["picks 应为数组（没有值得读的给空数组）"]
+    errs = []
+    for i, p in enumerate(picks):
+        if not isinstance(p, dict):
+            errs.append("picks[%d] 应为对象" % i)
+        elif not p.get("id"):
+            errs.append("picks[%d] 缺 id" % i)
+    return errs
+
+
+def rank_candidates(provider, candidates, limit=5):
+    """模型筛：从候选里挑出值得读的。返回 (picked, mode)。
+
+    这就是「用文章 workflow 的方法」那一步——workflow 把「候选主题归并与
+    排序」明确列为模型任务，这里把同一步搬到微知的发现层。
+
+    为什么不能只靠 source_tier 排序：级别只解决「谁说的」，不解决
+    「值不值得读」。一条官方发布的计费调整，通常不如一篇独立分析。
+
+    **失败要降级**：模型挂了不该导致当天一张卡都没有。筛选是优化，
+    不能变成单点故障，所以失败时退回按级别取前 limit。
+    """
+    if not candidates:
+        return [], "empty"
+    if provider is None:
+        return candidates[:limit], "no_provider"
+    block = "\n".join(
+        "[%s] (%s / %s) %s | %s" % (
+            c["id"], c.get("source_name"), c.get("source_tier"),
+            c.get("title"), (c.get("summary") or "")[:110].replace("\n", " "))
+        for c in candidates)
+    try:
+        data = provider.generate_json(
+            "candidate_rank", _validate_rank,
+            {"n": len(candidates), "limit": limit, "block": block})
+    except Exception as exc:  # noqa: BLE001
+        print("  ⚠️ 候选筛选失败，按来源级别取前 %d 篇：%s" % (limit, exc))
+        return candidates[:limit], "fallback"
+
+    by_id = {c["id"]: c for c in candidates}
+    picked = []
+    for p in (data.get("picks") or [])[:limit]:
+        c = by_id.get(str(p.get("id")))
+        if not c:
+            continue
+        c = dict(c)
+        c["why"] = str(p.get("why") or "")[:80]
+        picked.append(c)
+    if not picked:
+        print("  ⚠️ 模型未挑出任何候选，按来源级别取前 %d 篇" % limit)
+        return candidates[:limit], "fallback"
+    return picked, "model"
+
+
 # ===== 证据约束成卡（主产线）=====
 #
 # 为什么改：`generate_card` 把整篇正文塞进 prompt，让模型自己找重点——
@@ -317,7 +550,10 @@ def generate_card_evidenced(provider, source, article, cfg=None):
     card = bridge_v1.from_draft(
         draft_id, items=items,
         material={"title": article.get("title"), "url": article.get("url"),
-                  "site": source.get("name"), "source_tier": "blog",
+                  # 来源级别不再写死 blog：它决定卡上的「权威度」标签，
+                  # 写死会让 arXiv 论文和一条二手解读标成同一个值。
+                  "site": source.get("name") or source.get("source_name"),
+                  "source_tier": _tier_of(source),
                   "kind": "evolving"},
         provider=provider, figures=figures, shadow=False)
 
@@ -526,62 +762,120 @@ def main():
             print("❌ 生成失败。")
         return
 
-    import bridge_v1  # 证据链路落库走桥接层（与 v2 影子同一入口）
-
-    total_generated = 0
-    skipped = []       # 未成卡的材料与原因，供前端空状态展示
     max_cards = int(config.get("daily_generate_limit", 15) or 15)
-    per_source = args.limit or 2   # 每源最多生成最新 2 篇（增量过滤后），保证各源都能被覆盖
+    if args.legacy:
+        total_generated, skipped = _run_legacy(config, client, args, max_cards)
+    else:
+        total_generated, skipped = _run_pick(config, provider, args, max_cards)
+
+    _write_pipeline_report(total_generated, skipped, config)
+    print(f"\n🎉 本轮完成，共生成 {total_generated} 张卡片。")
+
+
+def _run_legacy(config, client, args, max_cards):
+    """旧路径：整篇正文塞 prompt，无证据约束。只作应急回退。"""
+    generated, skipped = 0, []
+    per_source = args.limit or 2
     for source in config.get("sources", []):
-        if total_generated >= max_cards:
+        if generated >= max_cards:
             print(f"\n⏹️  已达每日生成上限 {max_cards} 张，停止。")
             break
         print(f"\n📡 抓取源：{source['name']} ({source.get('category', '')})")
         try:
-            articles = fetch_rss(source, limit=args.limit or 50)  # 拉足量再增量过滤
+            articles = fetch_rss(source, limit=args.limit or 50)
         except Exception as e:
             print(f"  ❌ 抓取失败：{e}")
             continue
-
         print(f"  抓到 {len(articles)} 篇")
         if args.fetch_only:
             continue
-        # 全局增量 + 跨源内容去重：只处理没见过的（SimHash 识别改写转载）
         articles = filter_fresh(articles, dry=False)
         if not articles:
             print("  无新增条目，跳过。")
             continue
-        print(f"  新增 {len(articles)} 篇（增量过滤后取前 {per_source} 篇）")
+        print(f"  新增 {len(articles)} 篇（取前 {per_source} 篇）")
         for art in articles[:per_source]:
-            if total_generated >= max_cards:
+            if generated >= max_cards:
                 break
             print(f"  📄 {art['title'][:50]}")
-            # 跨源查重（B3 含 SimHash 内容指纹）：重复时一手域名优先替换旧卡，否则跳过
             dup = db.find_similar_title(art["title"], summary=art.get("summary", ""))
-            if dup:
-                old = db.get_card(dup)
-                if _is_preferred(art["url"]) and not _is_preferred((old or {}).get("source_url") or ""):
-                    print(f"    ↪️  与已有卡重复且本来源更权威（{dup[:36]}…），替换旧卡")
-                    db.delete_card(dup)
-                else:
-                    print(f"    ⏭️  跨源重复（已有 {dup[:36]}…），跳过")
-                    continue
-            if args.legacy:
-                card = generate_card(client, source, art, "t2_reading")
-                saved = bool(card) and save_card(card)
-                why = None if saved else "旧路径生成失败"
-            else:
-                card, why = generate_card_evidenced(provider, source, art, config)
-                saved = bool(card) and bridge_v1.save(card)
-            if saved:
-                total_generated += 1
+            if dup and not _is_preferred(art.get("url") or ""):
+                print(f"    ⏭️  跨源重复（已有 {dup[:36]}…），跳过")
+                skipped.append({"title": art["title"][:50], "why": "与已有卡重复"})
+                continue
+            card = generate_card(client, source, art, "t2_reading")
+            if card and save_card(card):
+                generated += 1
                 print(f"    ✅ 已生成卡片：{card.get('title', '')[:40]}")
             else:
-                print(f"    ⏭️  未成卡：{why}")
-                skipped.append({"title": (art.get("title") or "")[:50], "why": why})
+                print("    ⏭️  未成卡")
+                skipped.append({"title": art["title"][:50], "why": "旧路径生成失败"})
+    return generated, skipped
 
-    _write_pipeline_report(total_generated, skipped, config)
-    print(f"\n🎉 本轮完成，共生成 {total_generated} 张卡片。")
+
+def _run_pick(config, provider, args, max_cards):
+    """候选池 → 两级筛选 → 产卡。返回 (generated, skipped)。
+
+    和 _run_legacy 的根本差别：那边是「RSS 拉到什么就产什么」，
+    这边是「从候选里挑最值得读的几篇」——
+    各源的更新频率不再决定你今天读什么。
+    """
+    import bridge_v1
+
+    print("\n📡 收集候选")
+    candidates = collect_candidates(config, per_source=args.limit or 50,
+                                    dry=args.fetch_only)
+    print(f"  候选共 {len(candidates)} 条")
+    if args.fetch_only:
+        for c in candidates[:40]:
+            print(f"    · [{c['source_tier']}] {c['title'][:52]}")
+        return 0, []
+    if not candidates:
+        return 0, []
+
+    # 第一级：程序筛（不花模型调用）
+    hours = int(config.get("lookback_hours", 168) or 168)
+    cap = int(config.get("candidate_limit", 30) or 30)
+    pool = pretriage(candidates, hours=hours, cap=cap)
+    print(f"  时效窗口 {hours}h + 同题去重后 {len(pool)} 条")
+    if not pool:
+        print("  候选全部超出时效窗口，本轮不产出。")
+        return 0, []
+
+    # 第二级：模型筛（一次调用，决定今天读什么）
+    pick_n = min(int(config.get("daily_pick_limit", 5) or 5), max_cards)
+    selected, mode = rank_candidates(provider, pool, limit=pick_n)
+    print(f"  筛出 {len(selected)} 篇（{mode}）")
+    for c in selected:
+        print(f"    · [{c['source_tier']}] {c['title'][:46]}")
+        if c.get("why"):
+            print(f"      {c['why']}")
+
+    generated, skipped = 0, []
+    for cand in selected:
+        if generated >= max_cards:
+            break
+        title = cand.get("title") or ""
+        print(f"\n📄 {title[:50]}")
+        # 跨源查重：重复时一手域名优先替换旧卡，否则跳过
+        dup = db.find_similar_title(title, summary=cand.get("summary") or "")
+        if dup:
+            old = db.get_card(dup)
+            if _is_preferred(cand.get("url") or "") and not _is_preferred((old or {}).get("source_url") or ""):
+                print(f"    ↪️  与已有卡重复且本来源更权威（{dup[:36]}…），替换旧卡")
+                db.delete_card(dup)
+            else:
+                print(f"    ⏭️  跨源重复（已有 {dup[:36]}…），跳过")
+                skipped.append({"title": title[:50], "why": "与已有卡重复"})
+                continue
+        card, why = generate_card_evidenced(provider, cand, cand, config)
+        if card and bridge_v1.save(card):
+            generated += 1
+            print(f"    ✅ 已生成卡片：{card.get('title', '')[:40]}")
+        else:
+            print(f"    ⏭️  未成卡：{why}")
+            skipped.append({"title": title[:50], "why": why})
+    return generated, skipped
 
 
 if __name__ == "__main__":
