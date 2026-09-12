@@ -7,8 +7,8 @@
 import json
 from datetime import datetime
 
-import db
-import daily_agent
+from weizhi.core import db
+from weizhi.ops import daily_agent
 from conftest import make_card
 
 

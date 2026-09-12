@@ -8,9 +8,9 @@ import json
 
 import pytest
 
-import db
-import mastery
-import review_flow
+from weizhi.core import db
+from weizhi.serve import mastery
+from weizhi.serve import review_flow
 from conftest import make_card
 
 # 一张 v2 风格的卡：题目带 layer 与 error_reason，_bridge 指向 v2 目标
@@ -250,7 +250,7 @@ def test_finish_refuses_unknown_card(tmp_db):
 def test_bridged_card_enters_review_queue(tmp_db):
     """`db.save_card` 不写 next_review_at，而队列只取已到期的卡——
     桥接不显式给这一列，v2 的卡就永远不会出现在复习里。"""
-    import bridge_v1
+    from weizhi.produce import bridge_v1
     from datetime import datetime, timedelta
 
     draft = {"title": "t", "lead": "l", "objective": "o",
@@ -284,7 +284,7 @@ def test_next_review_at_lands_in_column_not_extra(tmp_db):
 
 
 def test_bridge_keeps_goal_key_for_mastery_attribution():
-    import bridge_v1
+    from weizhi.produce import bridge_v1
     draft = {"title": "t", "lead": "l", "objective": "o",
              "explanation": [{"text": "x", "cites": [0]}],
              "examples": [], "boundaries": [], "key_points": [], "transfer_task": "t"}
@@ -317,8 +317,8 @@ def test_set_card_review_schedule_fills_empty(tmp_db):
 
 def test_refresh_backfills_review_schedule(tmp_db):
     """刷新要把早期入库、没有调度信息的 v2 卡补上，否则它们进不了复习。"""
-    import bridge_v1
-    import evidence
+    from weizhi.produce import bridge_v1
+    from weizhi.produce import evidence
     sid, _ = evidence.ingest_source("https://x/rf", "循环四阶段与状态回写。" * 8,
                                     title="刷新用材料")
     did = db.save_v2_card_draft(input_hash="rf-h", schema_version="1.0",

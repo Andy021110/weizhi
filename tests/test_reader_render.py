@@ -18,7 +18,7 @@ import subprocess
 import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-READER = os.path.join(ROOT, "reader.html")
+READER = os.path.join(ROOT, "weizhi", "serve", "web", "reader.html")
 
 NODE_CANDIDATES = (
     "/Users/minghan/.workbuddy/binaries/node/versions/22.22.2/bin/node",
@@ -497,7 +497,7 @@ def test_preview_renderer_has_everything_it_needs():
     CP22 把渲染改成内容块驱动之后它漏了 `CARD_BLOCKS`，直接 ReferenceError。
     这个用例拿一张**混装各种块**的卡跑一遍，确保清单是完整的。
     """
-    import preview_v1_card as P
+    from tools import preview_v1_card as P
 
     card = {
         "title": "混装卡", "summary": "一句话", "word": "w", "definition_cn": "释义",

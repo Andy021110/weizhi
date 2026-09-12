@@ -6,9 +6,9 @@
 """
 import pytest
 
-import db
-import reader
-import review_flow
+from weizhi.core import db
+from weizhi.serve import reader
+from weizhi.serve import review_flow
 from conftest import make_card
 
 
@@ -154,7 +154,7 @@ def test_sealed_is_passthrough_when_review_flow_missing(monkeypatch):
 
 def test_answer_endpoint_accepts_question_zero(tmp_db):
     """回归：第 1 题（index=0）必须能判，不能被当成缺失值。"""
-    import db
+    from weizhi.core import db
     card = make_card(
         source_url="custom:z:1",
         quiz=[{"question": "第一题", "options": ["A", "B"], "answer": 0,
@@ -168,7 +168,7 @@ def test_answer_endpoint_accepts_question_zero(tmp_db):
 
 
 def test_answer_endpoint_rejects_missing_index(tmp_db):
-    import db
+    from weizhi.core import db
     card = make_card(source_url="custom:z:2")
     assert db.save_card(card, date="2026-09-12") is True
     fb, err = review_flow.answer_question("custom:z:2", reader._int_arg(None),

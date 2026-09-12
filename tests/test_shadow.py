@@ -1,7 +1,7 @@
 """影子模式测试：影子卡必须可见但对推送、质检、自动修复全部不可见。"""
 
-import db
-import daily_check
+from weizhi.core import db
+from weizhi.ops import daily_check
 
 
 def _shadow_card(**over):
@@ -54,7 +54,7 @@ def test_shadow_card_excluded_from_quality_check(tmp_db):
 
 def test_shadow_card_excluded_from_today_picks(tmp_db):
     """荐读是用户每天真正看到的东西，影子卡不能挤掉正片。"""
-    import daily_agent
+    from weizhi.ops import daily_agent
     from datetime import datetime
     db.save_card(_shadow_card(), date=datetime.now().strftime("%Y-%m-%d"))
     db.save_card({"title": "正常卡", "source_url": "https://x/3", "template": "t2_reading",
@@ -66,7 +66,7 @@ def test_shadow_card_excluded_from_today_picks(tmp_db):
 
 
 def test_bridge_marks_shadow_flag():
-    import bridge_v1
+    from weizhi.produce import bridge_v1
     draft = {"title": "t", "lead": "l", "objective": "o",
              "explanation": [{"text": "解释", "cites": [0]}],
              "examples": [{"text": "例子", "cites": [0]}],

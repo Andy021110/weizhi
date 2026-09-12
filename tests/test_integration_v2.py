@@ -40,18 +40,18 @@ Agent Harness 的核心循环由上下文组装、模型调用、工具执行与
 
 @pytest.fixture()
 def provider(tmp_db):
-    from providers import DeepSeekProvider
+    from weizhi.core.providers import DeepSeekProvider
     return DeepSeekProvider(api_key=_api_key(), timeout=120)
 
 
 def test_full_chain_m2_to_m5(tmp_db, provider):
-    import assessment
-    import db
-    import evidence
-    import goalspec
-    import mastery
-    import news
-    import planner
+    from weizhi.produce import assessment
+    from weizhi.core import db
+    from weizhi.produce import evidence
+    from weizhi.serve import goalspec
+    from weizhi.serve import mastery
+    from weizhi.produce import news
+    from weizhi.serve import planner
 
     # ---- M2：目标诊断 ----
     r = goalspec.build(provider, "我想搞明白 Agent Harness 到底怎么跑起来的",
@@ -92,7 +92,7 @@ def test_full_chain_m2_to_m5(tmp_db, provider):
     assert row["capability_gap"]
 
     # ---- M3：语义配图 ----
-    import visual
+    from weizhi.produce import visual
     figs = visual.plan_visuals(provider, row["payload"], claims)
     for fig in figs:
         assert fig["proposition"] and fig["reading"], "每张图要能回答一个明确问题"
@@ -144,8 +144,8 @@ def test_full_chain_m2_to_m5(tmp_db, provider):
 
 def test_evidence_and_draft_are_persisted(tmp_db, provider):
     """跑完之后证据与草稿都要能查回来——链路不能只在内存里成立。"""
-    import db
-    import evidence
+    from weizhi.core import db
+    from weizhi.produce import evidence
     sid, claims = evidence.ingest_source("https://example.com/x", MATERIAL)
     assert db.count_v2_claims(sid) == len(claims)
     assert db.get_v2_source_by_id(sid)["clean_text"]
@@ -160,12 +160,12 @@ def test_bridge_output_can_reach_the_frontend(tmp_db, provider):
     合规的 v2 卡都被拦下，桥接单独上线发不出一张卡。
     固定题量已按范围决策放宽（`daily_check.rule_check`），现在断言通过。
     """
-    import assessment
-    import bridge_v1
-    import card_writer
-    import db
-    import evidence
-    import schema_v2
+    from weizhi.produce import assessment
+    from weizhi.produce import bridge_v1
+    from weizhi.produce import card_writer
+    from weizhi.core import db
+    from weizhi.produce import evidence
+    from weizhi.core import schema_v2
 
     sid, claims = evidence.ingest_source(
         "https://example.com/bridge", MATERIAL, title="Agent Harness 执行循环")

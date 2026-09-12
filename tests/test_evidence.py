@@ -1,5 +1,5 @@
 """CP1 证据抽取测试：噪声过滤、偏移可回溯、数字标注、确定性、规划前置条件。"""
-import evidence
+from weizhi.produce import evidence
 
 SAMPLE = """
 首页 | 订阅 | 阅读原文
@@ -102,7 +102,7 @@ def test_ingest_and_plan_gate(tmp_db):
 
 
 def db_claim_count(sid):
-    import db
+    from weizhi.core import db
     return db.count_v2_claims(sid)
 
 

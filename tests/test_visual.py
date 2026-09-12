@@ -3,9 +3,9 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-import db
-import visual
-from providers import FakeTextProvider
+from weizhi.core import db
+from weizhi.produce import visual
+from weizhi.core.providers import FakeTextProvider
 
 GOOD_FIG = {
     "kind": "flow",

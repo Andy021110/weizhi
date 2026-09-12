@@ -11,9 +11,9 @@
 import json
 import os
 
-import evidence
-import db
-import pipeline
+from weizhi.produce import evidence
+from weizhi.core import db
+from weizhi.produce import pipeline
 
 
 def _article(title="测试材料", url="https://example.com/a", summary=None):
@@ -33,7 +33,7 @@ class _StubProvider:
 
 def test_goal_for_article_passes_schema():
     """构造出的 goal 必须过 GoalSpec 校验——不过的话 write_card_gated 会抛异常。"""
-    import schema_v2
+    from weizhi.core import schema_v2
     goal = pipeline._goal_for_article(_article(title="MoE 为什么能降低成本"))
     assert schema_v2.validate_goal_spec(goal) == []
 
@@ -84,7 +84,7 @@ def test_insufficient_claims_rejected(tmp_db, monkeypatch):
 
 def test_write_card_gate_failure_rejected(tmp_db, monkeypatch):
     """写作门禁不过 → 不成卡。"""
-    import card_writer
+    from weizhi.produce import card_writer
     _stub_chain(monkeypatch)
     monkeypatch.setattr(
         card_writer, "write_card_gated",
@@ -97,7 +97,7 @@ def test_write_card_gate_failure_rejected(tmp_db, monkeypatch):
 
 def test_v1_gate_failure_rejected(tmp_db, monkeypatch):
     """过不了 v1 门禁就不落库——宁可当天不出，也不污染卡片库。"""
-    import bridge_v1
+    from weizhi.produce import bridge_v1
     _stub_chain(monkeypatch)
     monkeypatch.setattr(bridge_v1, "publish_gate", lambda card: (False, ["缺字段"]))
     card, why = pipeline.generate_card_evidenced(
@@ -110,10 +110,10 @@ def test_v1_gate_failure_rejected(tmp_db, monkeypatch):
 
 def _stub_chain(monkeypatch):
     """把证据链路后半段全部桩掉，只验证接线顺序与参数传递。"""
-    import assessment
-    import bridge_v1
-    import card_writer
-    import visual
+    from weizhi.produce import assessment
+    from weizhi.produce import bridge_v1
+    from weizhi.produce import card_writer
+    from weizhi.produce import visual
 
     claims = [
         {"usable": True, "text": "第一条证据的内容足够长", "kind": "fact", "claim_idx": 0},
@@ -193,7 +193,7 @@ def test_default_path_is_evidenced_not_legacy():
     只会让线上悄悄退回「整篇塞 prompt」。
     """
     path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                        "pipeline.py")
+                        "weizhi", "produce", "pipeline.py")
     src = open(path, encoding="utf-8").read()
 
     # main 的默认分支走 _run_pick（候选筛选）
@@ -220,7 +220,7 @@ def test_main_initializes_db_itself():
     线上库早就有表，所以这个坑一直没暴露。
     """
     path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                        "pipeline.py")
+                        "weizhi", "produce", "pipeline.py")
     body = open(path, encoding="utf-8").read().split("def main(")[1]
     assert "db.init_db()" in body, "main 必须主动建表"
     assert body.index("db.init_db()") < body.index("fetch_rss(source"), \

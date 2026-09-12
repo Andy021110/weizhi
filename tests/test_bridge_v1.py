@@ -1,8 +1,8 @@
 """CP16 测试：v2 → v1 桥接层。映射正确性、分层还原、冲突可见、不凑题。"""
 import pytest
 
-import bridge_v1
-import db
+from weizhi.produce import bridge_v1
+from weizhi.core import db
 from conftest import make_body, make_structure
 
 MATERIAL = {"title": "Agent Harness 执行循环", "url": "https://example.com/h",
@@ -193,7 +193,7 @@ def test_does_not_pad_questions():
 def test_compat_delegates_to_the_real_gate(tmp_db):
     """不许在桥接里复制一份阈值：两份阈值必然漂移，
     漂移的后果是「桥上看着能发、线上却被拦」。"""
-    import daily_check
+    from weizhi.ops import daily_check
     card = bridge_v1.to_v1_card(_draft(), _items(immediate=1, later=0), MATERIAL, _supplement())
     assert bridge_v1.check_v1_compat(card) == daily_check.rule_check(card)
 
@@ -283,7 +283,7 @@ def test_stored_key_matches_what_save_wrote(tmp_db):
 
 def test_refresh_adds_figures_to_an_already_saved_card(tmp_db):
     """桥接规则改了以后，旧卡必须能被补齐——否则部署完看不到任何变化。"""
-    import evidence
+    from weizhi.produce import evidence
     sid, claims = evidence.ingest_source(
         MATERIAL["url"], "Agent Harness 的循环由四个阶段组成，状态回写让循环闭合。" * 6,
         title=MATERIAL["title"])
@@ -311,7 +311,7 @@ def test_refresh_adds_figures_to_an_already_saved_card(tmp_db):
 
 def test_refresh_preserves_untouched_fields(tmp_db):
     """刷新只动派生字段，不能顺手把正文或别的 extra 字段覆盖掉。"""
-    import evidence
+    from weizhi.produce import evidence
     sid, _ = evidence.ingest_source(MATERIAL["url"], "循环四阶段与状态回写。" * 8,
                                     title=MATERIAL["title"])
     did = db.save_v2_card_draft(
@@ -334,7 +334,7 @@ def test_refresh_preserves_untouched_fields(tmp_db):
 
 def test_refresh_reports_missing_card_instead_of_silence(tmp_db):
     """草稿在但卡不在时要报出来，不能装作刷过了。"""
-    import evidence
+    from weizhi.produce import evidence
     sid, _ = evidence.ingest_source("https://example.com/orphan", "内容。" * 30,
                                     title="孤儿草稿")
     db.save_v2_card_draft(input_hash="orphan-h", schema_version="1.0",
@@ -346,7 +346,7 @@ def test_refresh_reports_missing_card_instead_of_silence(tmp_db):
 
 def test_refresh_dry_run_writes_nothing(tmp_db):
     """dry-run 要能预览「会刷几张」，但不真的落库。"""
-    import evidence
+    from weizhi.produce import evidence
     sid, _ = evidence.ingest_source(MATERIAL["url"], "循环四阶段与状态回写。" * 8,
                                     title=MATERIAL["title"])
     did = db.save_v2_card_draft(

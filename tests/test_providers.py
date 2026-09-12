@@ -1,9 +1,9 @@
 """CP2 Provider 契约测试：确定性、重试、非法 JSON、幂等缓存、审计留痕。"""
 import pytest
 
-import db
-import providers
-from providers import FakeTextProvider, ProviderError
+from weizhi.core import db
+from weizhi.core import providers
+from weizhi.core.providers import FakeTextProvider, ProviderError
 
 INPUTS = {"goal": "理解 Agent Harness", "claims": ["a", "b"]}
 

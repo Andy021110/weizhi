@@ -11,9 +11,9 @@
 """
 import pytest
 
-import db
-import reader
-import revisions
+from weizhi.core import db
+from weizhi.serve import reader
+from weizhi.ops import revisions
 from conftest import make_card
 
 
@@ -226,8 +226,8 @@ def test_pending_lists_change_summary(card, fake_gen):
 def test_auto_paths_never_apply_a_revision(tmp_db, monkeypatch):
     """daily_check 与 daily_agent 的自动路径只许提出候选，不许动卡。"""
     import inspect
-    import daily_check
-    import daily_agent
+    from weizhi.ops import daily_check
+    from weizhi.ops import daily_agent
 
     check_src = inspect.getsource(daily_check.propose_revisions)
     assert "revisions.propose" in check_src

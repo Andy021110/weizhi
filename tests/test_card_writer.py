@@ -3,9 +3,9 @@ import copy
 
 import pytest
 
-import db
-import schema_v2
-from card_writer import (
+from weizhi.core import db
+from weizhi.core import schema_v2
+from weizhi.produce.card_writer import (
     build_body_inputs,
     build_structure_inputs,
     render_body,
@@ -13,7 +13,7 @@ from card_writer import (
     write_card,
 )
 from conftest import make_body, make_claims, make_structure, make_v2_goal
-from providers import FakeTextProvider, ProviderError
+from weizhi.core.providers import FakeTextProvider, ProviderError
 
 GOAL = make_v2_goal()
 CLAIMS = make_claims()

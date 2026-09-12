@@ -7,7 +7,7 @@
 这类「线上领先于仓库」的漂移不会报错、不会失败，只会在某天被人发现
 功能没了。所以这里用测试把它钉住。
 """
-import db
+from weizhi.core import db
 
 
 def test_ledger_functions_exist():
@@ -60,8 +60,8 @@ import os
 import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-READER = os.path.join(ROOT, "reader.html")
-SERVER = os.path.join(ROOT, "reader.py")
+READER = os.path.join(ROOT, "weizhi", "serve", "web", "reader.html")
+SERVER = os.path.join(ROOT, "weizhi", "serve", "reader.py")
 
 
 def _reader():

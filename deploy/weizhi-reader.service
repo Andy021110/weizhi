@@ -1,0 +1,36 @@
+# 微知碎片阅读器 systemd 服务
+# 部署时请把下面所有的 /path/to/content-pipeline 替换成项目实际绝对路径，
+# 并把 User=www-data 改成你的登录用户名（whoami 可查看）。
+#
+# 安装步骤见 DEPLOY.md，或直接执行：
+#   sudo cp weizhi-reader.service /etc/systemd/system/weizhi-reader.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now weizhi-reader
+
+[Unit]
+Description=微知碎片阅读器 (Weizhi Reader)
+After=network.target
+
+[Service]
+Type=simple
+# 改成你的实际用户名，避免用 root 运行
+User=www-data
+# 项目目录（必须替换成实际路径）
+WorkingDirectory=/path/to/content-pipeline
+# 用 venv 里的 python 以模块方式启动阅读服务（必须替换成实际路径）。
+# 用 -m 而不是直接指文件：代码已收进 weizhi/ 包，且要在项目根下运行，
+# 这样 import 才能解析到包，数据（config.json / weizhi.db）也还在根目录。
+ExecStart=/path/to/content-pipeline/.venv/bin/python -m weizhi.serve.reader
+# 崩溃后 5 秒自动重启
+Restart=always
+RestartSec=5
+# 服务端口，reader.py 默认读取环境变量 PORT，可省略（默认 8000）
+Environment=PORT=8000
+# 关闭时给进程发送 SIGTERM，超时后强制结束
+TimeoutStopSec=10
+# 输出写入 systemd 日志，可用 journalctl 查看
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,7 +1,7 @@
 """CP13 测试：资讯适配。跨源去重、来源优先级、冲突并列、时效与不生产。"""
 from datetime import datetime, timedelta
 
-import news
+from weizhi.produce import news
 
 NOW = datetime(2026, 9, 11, 12, 0, 0)
 

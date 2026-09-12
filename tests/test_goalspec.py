@@ -3,11 +3,11 @@ import copy
 
 import pytest
 
-import db
-import goalspec
-import providers
+from weizhi.core import db
+from weizhi.serve import goalspec
+from weizhi.core import providers
 from conftest import make_goalspec, make_probe
-from providers import FakeTextProvider
+from weizhi.core.providers import FakeTextProvider
 
 RAW = "我想学 Agent"
 

@@ -9,8 +9,8 @@ import json
 import sys
 import types
 
-import db
-import reader
+from weizhi.core import db
+from weizhi.serve import reader
 from conftest import make_card
 
 
@@ -174,7 +174,7 @@ def test_already_made_detects_bridged_card(tmp_db):
     标题；而选材时手上只有 RSS 的原始标题。用标题算键看着更精确，
     实际永远对不上——这个 bug 真的发生过，表现是每天照撞「重复卡」。
     """
-    import v2_shadow
+    from weizhi.ops import v2_shadow
     db.save_card(make_card(source_url="https://x/a#v2:abcdef123456",
                            title="生成出来的标题"), date="2026-09-11")
     assert v2_shadow.already_made("RSS 上的原标题", "https://x/a") is True
@@ -184,14 +184,14 @@ def test_already_made_detects_bridged_card(tmp_db):
 
 def test_already_made_ignores_plain_v1_card(tmp_db):
     """v1 自己产的卡用裸 URL，不能因为「同一个来源」就判成已桥接。"""
-    import v2_shadow
+    from weizhi.ops import v2_shadow
     db.save_card(make_card(source_url="https://x/a", title="v1 的卡"), date="2026-09-11")
     assert v2_shadow.already_made("x", "https://x/a") is False
 
 
 def test_already_made_escapes_like_wildcards(tmp_db):
     """URL 里的 % 必须转义，否则一篇带 % 的 url 会把邻近的都判成已出卡。"""
-    import v2_shadow
+    from weizhi.ops import v2_shadow
     db.save_card(make_card(source_url="https://x/100%off#v2:aa", title="t"),
                  date="2026-09-11")
     assert v2_shadow.already_made("t", "https://x/100%off") is True
@@ -222,7 +222,7 @@ def test_fetch_materials_skips_already_made(tmp_db, monkeypatch):
     真实现状：每天取 RSS 第一篇 → 第二天下架不了 → v1 门禁判「重复卡」→
     影子链路只成功过一次，之后再没产出过可评审的 v2 卡。
     """
-    import v2_shadow
+    from weizhi.ops import v2_shadow
     db.save_card(make_card(source_url="https://x/old#v2:deadbeef1234",
                            title="生成后的标题"), date="2026-09-11")
 
@@ -234,7 +234,7 @@ def test_fetch_materials_skips_already_made(tmp_db, monkeypatch):
 
 def test_fetch_materials_takes_first_when_all_new(tmp_db, monkeypatch):
     """没出过卡时仍然取最新一篇——跳过逻辑不能把正常路径也改了。"""
-    import v2_shadow
+    from weizhi.ops import v2_shadow
     _fake_sources(monkeypatch, [("第一篇", "https://x/1"), ("第二篇", "https://x/2")])
     out = v2_shadow.fetch_materials({"sources": [{"name": "测试源", "rss": "https://x/feed"}]},
                                     want=1)

@@ -4,9 +4,9 @@
       pipeline._article_sim / pipeline.filter_fresh
 核心 trade-off：内容指纹只算摘要（标题常被转载改写），跨源转载靠汉明距离 ≤3 识别。
 """
-import db
+from weizhi.core import db
 from conftest import make_card
-from pipeline import _article_sim, filter_fresh, mark_seen
+from weizhi.produce.pipeline import _article_sim, filter_fresh, mark_seen
 
 
 def test_norm_title_strips_punct():

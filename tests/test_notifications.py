@@ -11,10 +11,10 @@ from datetime import datetime
 
 import pytest
 
-import daily_agent
-import db
-import notifications as N
-import reader
+from weizhi.ops import daily_agent
+from weizhi.core import db
+from weizhi.core import notifications as N
+from weizhi.serve import reader
 
 
 def _types_stored():
@@ -149,7 +149,7 @@ def test_streak_is_gone_from_signals():
 
 
 def test_metrics_report_study_days_not_streak(tmp_db):
-    import daily_check
+    from weizhi.ops import daily_check
     m = daily_check.usage_metrics()
     assert "study_days" in m
     assert "streak" not in m

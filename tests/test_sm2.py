@@ -5,7 +5,7 @@
 - quality=0 忘记：间隔归 1、计数清零、ease -0.2（下限 1.3）
 - 连续记得 5 次 → mastered
 """
-import db
+from weizhi.core import db
 from conftest import make_card
 
 

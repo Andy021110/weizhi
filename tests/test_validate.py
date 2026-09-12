@@ -3,8 +3,8 @@
 核心 trade-off：LLM 输出不可信 → 白名单约束（只修待拍板内的卡、通知类型/长度白名单、
 荐食只能从今日新卡里挑），保证「半自主」不出界。
 """
-import db
-import daily_agent as da
+from weizhi.core import db
+from weizhi.ops import daily_agent as da
 from conftest import make_card
 
 

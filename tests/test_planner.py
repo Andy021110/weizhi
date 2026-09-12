@@ -3,13 +3,13 @@ import re
 
 import pytest
 
-import db
-import evidence
-import mastery
-import planner
-import schema_v2
+from weizhi.core import db
+from weizhi.produce import evidence
+from weizhi.serve import mastery
+from weizhi.serve import planner
+from weizhi.core import schema_v2
 from conftest import make_goalspec, make_probe  # noqa: F401
-from providers import FakeTextProvider
+from weizhi.core.providers import FakeTextProvider
 
 GOAL_KEY = "g-plan"
 MATERIAL = """
@@ -193,7 +193,7 @@ def test_materialize_writes_cards_with_milestone_mapping(tmp_db):
 
 def test_materialize_does_not_stop_on_single_failure(tmp_db, monkeypatch):
     """单张失败不拖垮整包，但要记进结果里，不能静默吞掉。"""
-    import card_writer
+    from weizhi.produce import card_writer
     spec = _setup_goal(tmp_db)
     sources = [_ingest("https://x/a%d" % i, MATERIAL) for i in range(2)]
     plan = planner.plan_next(GOAL_KEY, sources, spec=spec)

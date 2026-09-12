@@ -4,7 +4,7 @@
 为什么要有这个字段：顶栏写着「碎片时间 · 精读卡片」，但每张卡不告诉用户
 要花多久——而「现在读还是等会儿」正是靠它决定的。
 """
-import db
+from weizhi.core import db
 
 
 def test_reading_minutes_scales_with_body():

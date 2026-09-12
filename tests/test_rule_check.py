@@ -2,9 +2,9 @@
 
 规则覆盖：思考题/回答长度/quiz 题数/review_quiz/简答题/精读正文长度/重复卡/时效字段。
 """
-import db
+from weizhi.core import db
 from conftest import make_card
-from daily_check import rule_check
+from weizhi.ops.daily_check import rule_check
 
 
 def _labels(card):

@@ -12,8 +12,8 @@ import json
 import os
 from datetime import datetime, timedelta
 
-import db
-import pipeline
+from weizhi.core import db
+from weizhi.produce import pipeline
 
 
 # ---------- 来源分级 ----------
@@ -352,7 +352,7 @@ def test_default_path_is_pick_not_legacy():
     """默认必须走候选筛选。接线错了不会让任何功能测试变红，
     只会让线上悄悄退回「来几篇产几篇」——那正是这次要改掉的东西。"""
     path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                        "pipeline.py")
+                        "weizhi", "produce", "pipeline.py")
     body = open(path, encoding="utf-8").read().split("def main(")[1]
     assert "if args.legacy:" in body
     # 取 else 分支（默认路径），到 main 结束为止
@@ -368,7 +368,7 @@ def test_default_path_is_pick_not_legacy():
 def test_ingest_source_records_source_meta(tmp_db):
     """来源等级要记在材料上，不能只留一个卡上的标签——
     「这条来自哪个源的哪一级」是判断可信度的原始依据，只留结论事后无法复核。"""
-    import evidence
+    from weizhi.produce import evidence
     sid, _ = evidence.ingest_source(
         "https://openai.com/x", "某段足够长的正文内容，用来触发证据抽取。" * 12,
         title="标题", site="OpenAI 官方",
@@ -383,7 +383,7 @@ def test_ingest_source_records_source_meta(tmp_db):
 
 def test_ingest_source_meta_is_optional(tmp_db):
     """老调用点（v2_shadow）不传 meta 也必须能跑。"""
-    import evidence
+    from weizhi.produce import evidence
     sid, _ = evidence.ingest_source(
         "https://x/y", "另一段够长的正文内容，同样用来触发抽取。" * 12)
     assert sid

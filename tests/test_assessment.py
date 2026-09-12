@@ -3,10 +3,10 @@ from datetime import datetime, timedelta
 
 import pytest
 
-import assessment
-import db
-import mastery
-from providers import FakeTextProvider
+from weizhi.produce import assessment
+from weizhi.core import db
+from weizhi.serve import mastery
+from weizhi.core.providers import FakeTextProvider
 
 GOOD_ITEM = {
     "objective": "能说清循环由哪四个阶段组成",
@@ -159,7 +159,7 @@ def test_generate_attaches_ids_and_persists(tmp_db):
 
 
 def test_generate_rejects_unknown_cites(tmp_db):
-    from providers import ProviderError
+    from weizhi.core.providers import ProviderError
     bad = dict(GOOD_ITEM, cites=[99])
     with pytest.raises(ProviderError):
         assessment.generate(_provider([bad]), {"objective": "x", "title": "t"},

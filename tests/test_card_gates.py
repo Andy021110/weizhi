@@ -3,12 +3,12 @@ import copy
 
 import pytest
 
-import card_gates
-import db
-import schema_v2
-from card_writer import promote_to_candidate, write_card_gated
+from weizhi.produce import card_gates
+from weizhi.core import db
+from weizhi.core import schema_v2
+from weizhi.produce.card_writer import promote_to_candidate, write_card_gated
 from conftest import make_body, make_claims, make_draft, make_structure, make_v2_goal
-from providers import FakeTextProvider
+from weizhi.core.providers import FakeTextProvider
 
 CLAIMS = make_claims()
 

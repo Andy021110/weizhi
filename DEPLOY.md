@@ -207,10 +207,10 @@ sudo systemctl status weizhi-reader    # 查看状态
 cd /opt/weizhi/content-pipeline
 
 # 只抓不调 AI（不花钱），验证 RSS 源可用：
-.venv/bin/python pipeline.py --fetch-only --limit 1
+.venv/bin/python -m weizhi.produce.pipeline --fetch-only --limit 1
 
 # 跑真实流程（调 AI，每个源限 2 篇）：
-.venv/bin/python pipeline.py --limit 2
+.venv/bin/python -m weizhi.produce.pipeline --limit 2
 ```
 
 看到 `🎉 本轮完成，共生成 N 张卡片` 即成功。
@@ -224,7 +224,7 @@ crontab -e
 在文件末尾加一行（每天早上 6:00 自动跑，日志追加到 `run.log`）：
 
 ```
-0 6 * * * cd /opt/weizhi/content-pipeline && /opt/weizhi/content-pipeline/.venv/bin/python pipeline.py >> /opt/weizhi/content-pipeline/run.log 2>&1
+0 6 * * * cd /opt/weizhi/content-pipeline && /opt/weizhi/content-pipeline/.venv/bin/python -m weizhi.produce.pipeline >> /opt/weizhi/content-pipeline/run.log 2>&1
 ```
 
 > 关键点：

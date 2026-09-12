@@ -1,5 +1,5 @@
 """CP5 测试：A/B 评测脚手架的规则版基线、盲评编号、评分表与局限提示。"""
-import eval_ab
+from tools import eval_ab
 from conftest import make_claims
 
 SHORT = {"title": "一句话新闻", "url": "u", "text": "某公司于 2026 年发布了新模型。"}
@@ -22,14 +22,14 @@ def test_rule_version_is_plain_concatenation():
 
 def test_build_pair_skips_thin_material(tmp_db):
     """证据不足 2 条的材料不进评测——方案 3.1 的硬门槛。"""
-    import db
+    from weizhi.core import db
     db.init_db()
     provider = eval_ab._make_provider("fake")
     assert eval_ab.build_pair(SHORT, eval_ab.schema_v2.make_goal("k", "c"), provider) is None
 
 
 def test_build_pair_produces_both_versions(tmp_db):
-    import db
+    from weizhi.core import db
     db.init_db()
     provider = eval_ab._make_provider("fake")
     goal = eval_ab.schema_v2.make_goal("k", "能说清核心机制", success_evidence="能复述")

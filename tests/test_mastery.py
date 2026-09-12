@@ -1,8 +1,8 @@
 """CP10 测试：掌握度、遗忘风险、复习调度。全部确定性，不调模型。"""
 from datetime import datetime, timedelta
 
-import db
-import mastery
+from weizhi.core import db
+from weizhi.serve import mastery
 
 
 def test_correct_moves_toward_one():

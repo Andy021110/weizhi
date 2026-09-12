@@ -11,7 +11,7 @@ import os
 import re
 
 READER = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                      "reader.html")
+                      "weizhi", "serve", "web", "reader.html")
 
 
 def _src():
