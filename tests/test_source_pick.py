@@ -112,6 +112,80 @@ def test_pretriage_respects_cap():
     assert len(pipeline.pretriage(cands, hours=168, cap=30)) == 30
 
 
+def test_pretriage_window_is_per_tier():
+    """同一篇 20 天前的文章：快讯该丢，深度博客该留。
+
+    窗口如果全局一刀切，「一条 20 天前的深度长文」和「一条 20 天前的快讯」
+    就会被同样对待——这正是 7 天窗口下 9 月 2 日的长文在 9 月 12 日
+    读不到的原因。
+    """
+    table = {"official": 168, "blog": 720}
+    out = pipeline.pretriage([
+        _cand("官方旧闻", tier="official", ago_hours=480),   # 20 天
+        _cand("博客长文", tier="blog", ago_hours=480),       # 20 天
+    ], hours=168, hours_by_tier=table)
+    assert [c["title"] for c in out] == ["博客长文"]
+
+
+def test_pretriage_tier_window_does_not_rescue_ancient_items():
+    """放宽窗口不等于来者不拒：域名表兜底之外还是要拦住真正过期的。
+
+    这条是照着真实场景写的——某源的 feed 中段有一批 4 个月前的旧条目
+    从没被处理过，30 天窗口也不该把它们捞出来。
+    """
+    out = pipeline.pretriage([_cand("四个月前的旧文", tier="blog", ago_hours=123 * 24)],
+                             hours=168, hours_by_tier={"blog": 720})
+    assert out == []
+
+
+def test_pretriage_source_window_beats_tier_window():
+    """源上显式写的 lookback_hours 优先级最高。"""
+    c = _cand("只读一天的源", tier="blog", ago_hours=48)
+    c["lookback_hours"] = 24
+    out = pipeline.pretriage([c], hours=168, hours_by_tier={"blog": 720})
+    assert out == []
+    # 不写源级窗口时，同一个候选按 tier 的 720h 应当留下
+    c2 = _cand("只读一天的源", tier="blog", ago_hours=48)
+    assert len(pipeline.pretriage([c2], hours=168, hours_by_tier={"blog": 720})) == 1
+
+
+def test_pretriage_unknown_tier_uses_fallback_hours():
+    """级别不在表里时退回全局 hours，不能因为表里没有就全放行。"""
+    out = pipeline.pretriage([_cand("未知级别旧稿", tier="whatever", ago_hours=200)],
+                             hours=168, hours_by_tier={"blog": 720})
+    assert out == []
+
+
+def test_lookback_table_ignores_bad_config():
+    """配置写错不该炸掉整轮产线，也不该把窗口变成 0（那会拦掉一切）。"""
+    table = pipeline.lookback_table({
+        "lookback_hours_by_tier": {"blog": "不是数字", "analyst": None,
+                                   "OFFICIAL ": 100}})
+    assert table["blog"] == pipeline.LOOKBACK_HOURS_BY_TIER["blog"]
+    assert table["analyst"] == pipeline.LOOKBACK_HOURS_BY_TIER["analyst"]
+    assert table["official"] == 100          # 大小写与空格要归一
+    assert all(isinstance(v, int) for v in table.values())
+
+
+def test_default_window_policy_keeps_depth_sources_longer():
+    """默认策略本身要能守住「深度源不被 7 天窗口掐死」。"""
+    t = pipeline.LOOKBACK_HOURS_BY_TIER
+    assert t["blog"] > t["media"]
+    assert t["analyst"] > t["official"]
+    assert t["blog"] >= 24 * 30
+
+
+def test_collect_candidates_carries_source_lookback(tmp_db, monkeypatch):
+    """源级窗口要能随候选带下去，否则筛的时候拿不到。"""
+    monkeypatch.setattr(pipeline, "fetch_rss", lambda src, limit=None: [
+        {"title": "某文", "url": "https://baoyu.io/x", "summary": "s",
+         "published": None}])
+    out = pipeline.collect_candidates({"sources": [
+        {"name": "慢源", "rss": "https://baoyu.io/feed.xml", "lookback_hours": 2160}]})
+    assert out[0]["lookback_hours"] == 2160
+    assert out[0]["source_tier"] == "blog"
+
+
 # ---------- 模型筛（含降级） ----------
 
 class _FakeProvider:

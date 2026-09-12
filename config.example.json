@@ -5,6 +5,15 @@
   "daily_generate_limit": 15,
   "daily_pick_limit": 5,
   "lookback_hours": 168,
+  "lookback_hours_by_tier": {
+    "official": 168,
+    "paper": 168,
+    "primary": 168,
+    "media": 168,
+    "analyst": 720,
+    "blog": 720,
+    "social": 168
+  },
   "candidate_limit": 30,
   "interested_topics": ["Agent", "大模型", "RAG", "AI 产品"],
   "sources": [

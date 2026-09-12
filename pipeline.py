@@ -252,6 +252,45 @@ SOURCE_TIER_BY_DOMAIN = {
     "ruanyifeng.com": "blog",
 }
 
+# 时效窗口按**内容寿命**分档，不是按源的更新频率分档。
+#
+# 为什么不是频率：cron 每天跑两次，新文章当天就会进候选，
+# 窗口管的从来不是「能不能及时看到」，而是「一条**没处理过的**旧文章
+# 还值不值得读」。所以一手快讯（公告/媒体/论文）只读 7 天内的——
+# 过期的新闻是噪音；博客与分析师通讯读 30 天内的——三周前的好文章
+# 仍然是好文章，而按 7 天算的话，一篇 9 月 2 日的长文在 9 月 12 日
+# 就已经过期读不到了。
+#
+# 坦白说这是拿 tier 当**代理**：tier 本身是可信度轴，和内容寿命相关
+# 但不等价（arXiv 是 tier 0 却是每日更新的一次文献，窗口照样只有 7 天）。
+# 要更精确就在源上写 lookback_hours，它的优先级最高。
+LOOKBACK_HOURS_BY_TIER = {
+    "official": 168,    # 官方公告：过期快
+    "paper": 168,       # 论文：每日更新，只取新的
+    "primary": 168,     # 开源一手：更新频繁
+    "media": 168,       # 媒体快讯
+    "analyst": 720,     # 分析师通讯：周更/月更，内容寿命长
+    "blog": 720,        # 深度博客：更新慢但不过期
+    "social": 168,
+}
+
+
+def lookback_table(config):
+    """窗口表：代码默认 <- config 覆盖。
+
+    配置写错（值不是数字）时跳过该项而不是让整轮产线炸掉——
+    时效窗口是优化项，不该变成单点故障。
+    """
+    table = dict(LOOKBACK_HOURS_BY_TIER)
+    raw = config.get("lookback_hours_by_tier")
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            try:
+                table[str(k).strip().lower()] = int(v)
+            except (TypeError, ValueError):
+                continue
+    return table
+
 
 def resolve_tier(src):
     """源的级别：config 显式 > 域名默认 > blog。
@@ -329,6 +368,9 @@ def collect_candidates(cfg, per_source=50, dry=False):
                 "source_name": src.get("name") or "",
                 "source_tier": tier,
                 "topics": src.get("topics") or [],
+                # 源级时效窗口（可空）。带上它，筛的时候才能按源算，
+                # 而不是所有源共用一刀切的 168h。
+                "lookback_hours": src.get("lookback_hours"),
                 "title": (a.get("title") or "").strip(),
                 "url": url,
                 "summary": a.get("summary") or "",
@@ -348,19 +390,35 @@ def _parse_ts(s):
         return None
 
 
-def pretriage(candidates, hours=168, cap=30):
+def pretriage(candidates, hours=168, cap=30, hours_by_tier=None):
     """程序筛：时效窗口 + 同题去重 + 按级别排序 + 限量。
 
     先筛一遍再交给模型，不是为了省钱，是为了**判断质量**：
     30 个候选和 300 个候选对模型是两回事，后者会让它只挑标题顺眼的。
+
+    窗口逐条算，优先级：候选自带的源级 lookback_hours > 级别默认表 >
+    hours 兜底。逐条算而不是全局一刀切，是因为「一条 20 天前的深度长文」
+    和「一条 20 天前的快讯」根本不是一回事。
     """
     import news
-    cutoff = datetime.now() - timedelta(hours=hours)
+    try:
+        fallback = int(hours)
+    except (TypeError, ValueError):
+        fallback = 168
+    table = hours_by_tier or {}
+    now = datetime.now()
     seen, fresh = set(), []
     for c in candidates:
         ts = _parse_ts(c.get("published_at"))
-        if ts and ts < cutoff:
-            continue                                  # 超出时效窗口
+        if ts:
+            limit = c.get("lookback_hours") or table.get(
+                c.get("source_tier"), fallback)
+            try:
+                limit = int(limit)
+            except (TypeError, ValueError):
+                limit = fallback
+            if ts < now - timedelta(hours=limit):
+                continue                              # 超出该源/该级别的时效窗口
         key = (c.get("title") or "").strip().lower()
         if key and key in seen:
             continue                                  # 同题跨源，保留先到的
@@ -843,8 +901,16 @@ def _run_pick(config, provider, args, max_cards):
     # 第一级：程序筛（不花模型调用）
     hours = int(config.get("lookback_hours", 168) or 168)
     cap = int(config.get("candidate_limit", 30) or 30)
-    pool = pretriage(candidates, hours=hours, cap=cap)
-    print(f"  时效窗口 {hours}h + 同题去重后 {len(pool)} 条")
+    table = lookback_table(config)
+    pool = pretriage(candidates, hours=hours, cap=cap, hours_by_tier=table)
+    # 把窗口策略打出来：出卡少的时候，第一个要回答的问题就是
+    # 「是没内容，还是窗口把人拦了」——日志里没有这行就得回头猜。
+    by_hours = {}
+    for tier_name, h in table.items():
+        by_hours.setdefault(h, []).append(tier_name)
+    desc = "、".join("%dh(%s)" % (h, "/".join(sorted(names)))
+                     for h, names in sorted(by_hours.items()))
+    print(f"  时效窗口 {desc}；同题去重后 {len(pool)} 条")
     if not pool:
         print("  候选全部超出时效窗口，本轮不产出。")
         return 0, []
