@@ -89,6 +89,8 @@ extraction costs an extra step, and some material is dropped for "not enough ext
 **How to check**: card footers carry source, source tier and the original link; the database holds
 **1,659** extracted facts from 12 sources; citation numbers in the body resolve back to the original.
 
+<img src="docs/assets/readme/05-source.png" width="330" alt="Source and original link at the foot of a card">
+
 ### 2. Quality must be measured — but repairs may not be silent
 
 **Problem**: model output varies, and reading every card by hand does not scale.
@@ -103,6 +105,8 @@ content you have already read**.
 **How to check**: the quality page shows "19 inspected · 68% pass · 4.17 average", the distribution of
 issue types, the auto-repair success rate, and a revert entry for each repair.
 **I did not hide the 68%** — a 68% that gets caught and fixed by the system says more than "quality is excellent".
+
+<img src="docs/assets/readme/07-quality-trend.png" width="330" alt="Quality trend and revertible repair log">
 
 ### 3. Staleness windows follow content lifespan, not one global number
 
