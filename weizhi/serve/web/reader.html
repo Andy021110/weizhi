@@ -2936,14 +2936,16 @@
       }
       html += '</div>';
       // 内容块分布（取代模板分布）：类型已从界面下线，
-      // "我的卡片里有多少带代码/带步骤/带例子"才是用户能拿来判断的事
+      // "我的卡片里有多少带代码/带步骤/带例子"才是用户能拿来判断的事。
+      // 单独一张卡片：它答的是「我卡里有什么」，和上面「我会什么」不是同一件事——
+      // 混在「掌握度」标题下会让人以为它是掌握度的细分。
       var blks = d.block_dist || [];
       if (blks.length) {
         var bmax = blks[0].count;
-        html += '<div style="margin:12px 0 2px;font-size:12px;color:var(--text-3)">内容块分布</div>' +
-          blks.map(function (b) { return dashBar(blockTitle(b.name), b.count, bmax, '#3D8A5A'); }).join('');
+        html += '<div class="section" style="margin-top:14px"><div class="section-title">内容块分布</div>' +
+          blks.map(function (b) { return dashBar(blockTitle(b.name), b.count, bmax, '#3D8A5A'); }).join('') +
+          '</div>';
       }
-      html += '</div>';
       // 2. 质量趋势
       var trend = q.trend || [];
       html += '<div class="section" style="margin-top:14px"><div class="section-title">质量趋势' +
@@ -2985,6 +2987,9 @@
       } else {
         html += '<div style="font-size:12px;color:var(--text-3)">近 7 天无自动修复</div>';
       }
+      // 关掉「修复记录」这张卡片。原先少了这一句，于是下面「内容质量」被嵌在
+      // 修复记录里——同屏两个不同问题挤一张卡，和上面「内容块分布」是同一类疏漏。
+      html += '</div>';
       // 5. 内容质量报告入口。原来是常驻顶栏的「质检」，占着和「今天复习」
       //    同等的位置——可它是维护动作，日常读卡用不到；而且「质检」两个字
       //    会让人以为是自己需要检查什么。
