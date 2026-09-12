@@ -1,0 +1,135 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 720" width="1180" height="720" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif">
+  <rect x="0" y="0" width="1180" height="720" fill="#FBFAF8"/>
+
+  <!-- 标题 -->
+  <text x="40" y="46" font-size="19" font-weight="700" fill="#2B2B28">微知 · 系统结构</text>
+  <text x="40" y="70" font-size="12.5" fill="#8A877E">一台 2C2G 服务器上跑四个进程，互不阻塞；模型只在标记的两处被调用</text>
+
+  <!-- ============ 第一层：采集与产卡 ============ -->
+  <rect x="40" y="96" width="1100" height="150" rx="14" fill="#FFFFFF" stroke="#E4E0D8"/>
+  <rect x="40" y="96" width="4" height="150" rx="2" fill="#3D8A5A"/>
+  <text x="62" y="124" font-size="13.5" font-weight="700" fill="#2F6D47">采集与产卡</text>
+  <text x="150" y="124" font-size="12" fill="#8A877E">pipeline.py · cron 6:00 / 18:00</text>
+
+  <g font-size="12.5" fill="#2B2B28" text-anchor="middle">
+    <rect x="62" y="142" width="132" height="76" rx="10" fill="#F5F4F1" stroke="#E4E0D8"/>
+    <text x="128" y="170">8 个精选源</text>
+    <text x="128" y="190" font-size="11" fill="#8A877E">官方 / 论文 / 媒体</text>
+    <text x="128" y="206" font-size="11" fill="#8A877E">深度博客 / 分析</text>
+
+    <rect x="216" y="142" width="132" height="76" rx="10" fill="#F5F4F1" stroke="#E4E0D8"/>
+    <text x="282" y="170">候选池</text>
+    <text x="282" y="190" font-size="11" fill="#8A877E">不再「来几篇产几篇」</text>
+
+    <rect x="370" y="142" width="132" height="76" rx="10" fill="#F0F6F2" stroke="#CDE0D4"/>
+    <text x="436" y="166">程序筛 · 不花钱</text>
+    <text x="436" y="186" font-size="11" fill="#5C7A66">时效窗口按内容寿命</text>
+    <text x="436" y="202" font-size="11" fill="#5C7A66">快讯 7 天 / 深度 30 天</text>
+
+    <rect x="524" y="142" width="132" height="76" rx="10" fill="#F0F6F2" stroke="#CDE0D4"/>
+    <text x="590" y="166">模型筛 · 一次调用</text>
+    <text x="590" y="186" font-size="11" fill="#5C7A66">从候选里挑今天读什么</text>
+    <text x="590" y="202" font-size="11" fill="#5C7A66">带「为什么值得读」</text>
+
+    <rect x="678" y="142" width="132" height="76" rx="10" fill="#FDF6EC" stroke="#EBD7B0"/>
+    <text x="744" y="166">证据抽取</text>
+    <text x="744" y="186" font-size="11" fill="#8A6A2A">先定位事实，再写作</text>
+    <text x="744" y="202" font-size="11" fill="#8A6A2A">每条正文标引用编号</text>
+
+    <rect x="832" y="142" width="132" height="76" rx="10" fill="#FDF6EC" stroke="#EBD7B0"/>
+    <text x="898" y="166">写作门禁</text>
+    <text x="898" y="186" font-size="11" fill="#8A6A2A">长度 / 结构 / 信息密度</text>
+    <text x="898" y="202" font-size="11" fill="#8A6A2A">不过就不入库</text>
+
+    <rect x="986" y="142" width="132" height="76" rx="10" fill="#E7F2EC" stroke="#3D8A5A"/>
+    <text x="1052" y="170" font-weight="700">卡片入库</text>
+    <text x="1052" y="190" font-size="11" fill="#5C7A66">来源·级别·原文链接</text>
+  </g>
+  <g stroke="#B9B5AA" stroke-width="1.4" fill="none">
+    <path d="M194 180 H214" marker-end="url(#a)"/><path d="M348 180 H368" marker-end="url(#a)"/>
+    <path d="M502 180 H522" marker-end="url(#a)"/><path d="M656 180 H676" marker-end="url(#a)"/>
+    <path d="M810 180 H830" marker-end="url(#a)"/><path d="M964 180 H984" marker-end="url(#a)"/>
+  </g>
+
+  <!-- ============ 第二层：服务层 ============ -->
+  <rect x="40" y="266" width="1100" height="150" rx="14" fill="#FFFFFF" stroke="#E4E0D8"/>
+  <rect x="40" y="266" width="4" height="150" rx="2" fill="#3D6F8A"/>
+  <text x="62" y="294" font-size="13.5" font-weight="700" fill="#3D6F8A">阅读与复习</text>
+  <text x="150" y="294" font-size="12" fill="#8A877E">reader.py 常驻服务 + reader.html 单文件 PWA</text>
+
+  <g font-size="12.5" fill="#2B2B28" text-anchor="middle">
+    <rect x="62" y="312" width="212" height="76" rx="10" fill="#F5F4F1" stroke="#E4E0D8"/>
+    <text x="168" y="336">今日卡片 · 精读</text>
+    <text x="168" y="356" font-size="11" fill="#8A877E">正文每段可回溯到原文</text>
+    <text x="168" y="372" font-size="11" fill="#8A877E">卡上有来源与权威度</text>
+
+    <rect x="296" y="312" width="212" height="76" rx="10" fill="#F5F4F1" stroke="#E4E0D8"/>
+    <text x="402" y="336">间隔复习 · SM-2</text>
+    <text x="402" y="356" font-size="11" fill="#8A877E">选择题在服务端判分</text>
+    <text x="402" y="372" font-size="11" fill="#8A877E">简答题 AI 批改</text>
+
+    <rect x="530" y="312" width="212" height="76" rx="10" fill="#F5F4F1" stroke="#E4E0D8"/>
+    <text x="636" y="336">发现层 · 每日 Top 3</text>
+    <text x="636" y="356" font-size="11" fill="#8A877E">不推送，是自己来逛的</text>
+    <text x="636" y="372" font-size="11" fill="#8A877E">每条附「为什么挑它」</text>
+
+    <rect x="764" y="312" width="212" height="76" rx="10" fill="#F5F4F1" stroke="#E4E0D8"/>
+    <text x="870" y="336">学习画像与统计</text>
+    <text x="870" y="356" font-size="11" fill="#8A877E">掌握度分布 / 薄弱卡</text>
+    <text x="870" y="372" font-size="11" fill="#8A877E">回喂到推荐排序</text>
+
+    <rect x="998" y="312" width="120" height="76" rx="10" fill="#EEF3F7" stroke="#C9DCE7"/>
+    <text x="1058" y="336" font-size="12">读写分权</text>
+    <text x="1058" y="356" font-size="10.5" fill="#5B7C90">主人 / 只读访客</text>
+  </g>
+
+  <!-- ============ 第三层：质量与编排 ============ -->
+  <rect x="40" y="436" width="1100" height="136" rx="14" fill="#FFFFFF" stroke="#E4E0D8"/>
+  <rect x="40" y="436" width="4" height="136" rx="2" fill="#B9851F"/>
+  <text x="62" y="464" font-size="13.5" font-weight="700" fill="#B9851F">质量与编排</text>
+  <text x="150" y="464" font-size="12" fill="#8A877E">daily_check.py 3:30 · daily_agent.py 3:35</text>
+
+  <g font-size="12.5" fill="#2B2B28" text-anchor="middle">
+    <rect x="62" y="482" width="236" height="70" rx="10" fill="#FDF6EC" stroke="#EBD7B0"/>
+    <text x="180" y="506">规则检查 + AI 打分</text>
+    <text x="180" y="526" font-size="11" fill="#8A6A2A">通过率 / 问题类型 / badcase</text>
+
+    <rect x="320" y="482" width="236" height="70" rx="10" fill="#FDF6EC" stroke="#EBD7B0"/>
+    <text x="438" y="506">只出「修订候选」</text>
+    <text x="438" y="526" font-size="11" fill="#8A6A2A">不静默改已发布的卡，可回滚</text>
+
+    <rect x="578" y="482" width="236" height="70" rx="10" fill="#F5F4F1" stroke="#E4E0D8"/>
+    <text x="696" y="506">管家决策</text>
+    <text x="696" y="526" font-size="11" fill="#8A877E">通知 / 待拍板 / 周报</text>
+
+    <rect x="836" y="482" width="282" height="70" rx="10" fill="#F5F4F1" stroke="#E4E0D8"/>
+    <text x="977" y="506">全部动作留痕</text>
+    <text x="977" y="526" font-size="11" fill="#8A877E">调用审计：provider / 耗时 / 重试 / 错误</text>
+  </g>
+
+  <!-- ============ 第四层：存储与模型 ============ -->
+  <rect x="40" y="592" width="536" height="96" rx="14" fill="#FFFFFF" stroke="#E4E0D8"/>
+  <text x="66" y="620" font-size="13.5" font-weight="700" fill="#2B2B28">存储</text>
+  <text x="130" y="620" font-size="12" fill="#8A877E">SQLite 单文件</text>
+  <text x="66" y="646" font-size="11.5" fill="#6B6A64">cards · progress · plans · v2_sources · v2_claims · user_state</text>
+  <text x="66" y="668" font-size="11.5" fill="#6B6A64">demo_access（只读访客流水）· v2_model_calls（调用审计）</text>
+
+  <rect x="604" y="592" width="536" height="96" rx="14" fill="#FFFFFF" stroke="#E4E0D8"/>
+  <text x="630" y="620" font-size="13.5" font-weight="700" fill="#2B2B28">模型</text>
+  <text x="694" y="620" font-size="12" fill="#8A877E">DeepSeek，经 providers.py 统一出口</text>
+  <text x="630" y="646" font-size="11.5" fill="#6B6A64">schema 校验 · 失败重试 · 输出审计 · 成本可折算</text>
+  <text x="630" y="668" font-size="11.5" fill="#6B6A64">换模型只改一处，业务代码不感知</text>
+
+  <!-- 层间箭头 -->
+  <g stroke="#B9B5AA" stroke-width="1.4" fill="none">
+    <path d="M590 246 V264" marker-end="url(#a)"/>
+    <path d="M590 416 V434" marker-end="url(#a)"/>
+    <path d="M590 572 V590" marker-end="url(#a)"/>
+  </g>
+
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#B9B5AA"/>
+    </marker>
+  </defs>
+</svg>

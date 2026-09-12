@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 560" width="1180" height="560" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif">
+  <rect x="0" y="0" width="1180" height="560" fill="#FBFAF8"/>
+  <text x="40" y="46" font-size="19" font-weight="700" fill="#2B2B28">一天是怎么筛出「今天读什么」的</text>
+  <text x="40" y="70" font-size="12.5" fill="#8A877E">数字取自 2026-09-12 的真实抓取与运行日志，不是示意值</text>
+
+  <!-- ===== 左：漏斗 ===== -->
+  <rect x="40" y="96" width="620" height="424" rx="14" fill="#FFFFFF" stroke="#E4E0D8"/>
+  <text x="66" y="126" font-size="13" font-weight="700" fill="#2F6D47">两级筛选：程序筛管能算出来的，模型筛管算不出来的</text>
+
+  <g font-size="12.5">
+    <!-- 1 -->
+    <rect x="66" y="146" width="568" height="46" rx="9" fill="#F5F4F1" stroke="#E4E0D8"/>
+    <text x="82" y="166" font-weight="700" fill="#2B2B28">抓到的候选</text>
+    <text x="82" y="183" font-size="11" fill="#8A877E">8 个源增量抓取，跨源同题去重后</text>
+    <text x="618" y="175" font-size="17" font-weight="700" fill="#2B2B28" text-anchor="end">150</text>
+
+    <!-- 2 程序筛 -->
+    <rect x="66" y="206" width="462" height="60" rx="9" fill="#FDF6EC" stroke="#EBD7B0"/>
+    <text x="82" y="228" font-weight="700" fill="#8A6A2A">程序筛 · 时效窗口</text>
+    <text x="82" y="246" font-size="11" fill="#8A6A2A">按内容寿命分档：快讯 7 天、深度博客 30 天</text>
+    <text x="82" y="261" font-size="11" fill="#8A6A2A">筛掉 126 条（feed 里回溯出的 4 个月前旧条目）→ 归档</text>
+    <text x="512" y="241" font-size="15" font-weight="700" fill="#B9851F" text-anchor="end">−126</text>
+
+    <!-- 3 候选池 -->
+    <rect x="66" y="280" width="330" height="46" rx="9" fill="#F0F6F2" stroke="#CDE0D4"/>
+    <text x="82" y="300" font-weight="700" fill="#2F6D47">进入候选池</text>
+    <text x="82" y="317" font-size="11" fill="#5C7A66">一手来源优先排序</text>
+    <text x="380" y="309" font-size="17" font-weight="700" fill="#2F6D47" text-anchor="end">24</text>
+
+    <!-- 4 模型筛 -->
+    <rect x="66" y="340" width="240" height="46" rx="9" fill="#F0F6F2" stroke="#CDE0D4"/>
+    <text x="82" y="360" font-weight="700" fill="#2F6D47">模型筛</text>
+    <text x="82" y="377" font-size="11" fill="#5C7A66">一次调用，带理由</text>
+    <text x="290" y="369" font-size="17" font-weight="700" fill="#2F6D47" text-anchor="end">5</text>
+
+    <!-- 5 门禁 -->
+    <rect x="66" y="400" width="168" height="46" rx="9" fill="#E7F2EC" stroke="#3D8A5A"/>
+    <text x="82" y="420" font-weight="700" fill="#2F6D47">写作门禁 → 入库</text>
+    <text x="82" y="437" font-size="11" fill="#5C7A66">不过就丢弃</text>
+
+    <text x="66" y="482" font-size="11.5" fill="#8A877E">上面的 150 → 24 是一次完整抓取的实测口径；「模型筛出 5 篇」是每日上限。</text>
+    <text x="66" y="500" font-size="11.5" fill="#8A877E">同一天线上两次实跑：第一次 7 条候选全部超窗归档、不产出；</text>
+    <text x="66" y="518" font-size="11.5" fill="#8A877E">第二次 2 篇进入产卡，1 篇跨源重复跳过，1 篇成卡。</text>
+  </g>
+
+  <!-- ===== 右：对比 ===== -->
+  <rect x="684" y="96" width="456" height="424" rx="14" fill="#FFFFFF" stroke="#E4E0D8"/>
+  <text x="710" y="126" font-size="13" font-weight="700" fill="#B9851F">修掉的一个真实缺陷</text>
+  <text x="710" y="150" font-size="12" fill="#6B6A64">「见过」曾经被当成「产过」</text>
+
+  <text x="710" y="184" font-size="12" fill="#2B2B28">原来的逻辑：抓到就标记为已见，后面只挑 5 篇产卡。</text>
+  <text x="710" y="204" font-size="12" fill="#2B2B28">于是没被挑中的那些永久消失，再也不会被考虑。</text>
+
+  <!-- 老规则 -->
+  <text x="710" y="248" font-size="12" font-weight="700" fill="#C94F4F">老规则</text>
+  <rect x="710" y="258" width="404" height="26" rx="6" fill="#EFE9E5"/>
+  <rect x="710" y="258" width="404" height="26" rx="6" fill="#EFDCD8"/>
+  <rect x="710" y="258" width="13" height="26" rx="6" fill="#3D8A5A"/>
+  <text x="731" y="276" font-size="11" fill="#8A5C58">标记已见 150 条 → 只有 5 条有机会</text>
+  <text x="710" y="304" font-size="12" font-weight="700" fill="#C94F4F">145 条永久丢弃</text>
+
+  <!-- 新规则 -->
+  <text x="710" y="348" font-size="12" font-weight="700" fill="#2F6D47">现在</text>
+  <rect x="710" y="358" width="404" height="26" rx="6" fill="#EFDCD8"/>
+  <rect x="710" y="358" width="353" height="26" rx="6" fill="#D6E4DA"/>
+  <text x="731" y="376" font-size="11" fill="#5C7A66">标记已见 131 条（5 条被挑中 + 126 条过期归档）</text>
+  <text x="710" y="404" font-size="12" font-weight="700" fill="#2F6D47">19 条留在池子里，等下一轮</text>
+
+  <text x="710" y="446" font-size="11.5" fill="#8A877E">「已见」现在只有一个含义：这条已经有结论了——</text>
+  <text x="710" y="464" font-size="11.5" fill="#8A877E">要么产过卡，要么已经超出时效窗口。没轮到的留着。</text>
+  <text x="710" y="490" font-size="11.5" fill="#8A877E">这样「候选池」才名副其实：模型不再只是在「这 12 小时新到的</text>
+  <text x="710" y="508" font-size="11.5" fill="#8A877E">几条」里挑，而是在窗口内所有未读过的文章里挑。</text>
+</svg>
