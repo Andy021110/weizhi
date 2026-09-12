@@ -109,6 +109,10 @@ http://47.76.25.13/?key=WeiZhi-Demo-ReadOnly-4t8m
 
 图的源文件是 [architecture.spec.json](docs/assets/readme/architecture.spec.json)：改了架构就改它重渲，别手改图片——手画的图会静默过期。
 
+想看**可交互版**（切明暗主题、按「产卡链路 / 读到与记住 / 凌晨自己跑的」三条路径追踪，能缩放）：
+
+**https://andy021110.github.io/weizhi/**
+
 目录也按这四层分，代码和数据是分开的：
 
 ```

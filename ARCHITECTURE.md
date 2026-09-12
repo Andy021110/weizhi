@@ -5,6 +5,13 @@
 > 系统结构图的源文件是 `docs/assets/readme/architecture.spec.json`（用 [archify](https://github.com/tt-a1i/archify) 渲染）。
 > 架构变了改 spec 重渲，**不要手改** `docs/assets/readme/architecture.png`——
 > 手画的图不会报错，只会静默过期。
+>
+> 渲染（会先跑校验，不通过就不出文件）：
+> ```bash
+> python -m tools.build_architecture_page --archify <archify 目录含 bin/archify.mjs 的那层>
+> ```
+> 图片产物给 README 引用；同一份 spec 还会渲染成可交互网页，
+> 落在 `docs/index.html`（GitHub Pages 首页）：https://andy021110.github.io/weizhi/
 
 ## 1. 总览
 

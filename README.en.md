@@ -109,6 +109,10 @@ Call auditing started on 09-11: 75 calls, 194k input tokens, 42k output tokens, 
 
 The diagram is generated from [architecture.spec.json](docs/assets/readme/architecture.spec.json): edit the spec and re-render it. Hand-edited images go stale without telling anyone.
 
+There is an **interactive version** (theme toggle, three guided paths through the data flow, zoomable):
+
+**https://andy021110.github.io/weizhi/**
+
 The directory follows the same four layers, and code is kept separate from data:
 
 ```
