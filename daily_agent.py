@@ -20,6 +20,7 @@ cron 3:35 跑（daily_check 3:30 之后），按 ReAct 循环落地：
 import argparse
 import json
 import os
+import re
 import traceback
 from datetime import datetime, timedelta
 
@@ -47,7 +48,7 @@ AGENT_SYSTEM = """你是一位「私人学习管家 Agent」，负责替用户�
 2. regen_candidates 只能从输入的【可修订清单】里选（source_url 必须原样匹配）。
    它们只会被**提出为修订候选**，不会自动改动卡片——采纳与否由用户在审核界面决定。
    所以不要在通知里提它们（那是审核界面的事）。
-3. recommendations 只能从【今日新卡候选】里挑（source_url 必须原样匹配），最多 3 条；候选不足 3 条就少给，不要硬凑。
+3. recommendations 只能从【今日新卡候选】里挑，source_url 用候选里的原值，最多 3 条；候选不足就少给，不要硬凑。
 4. notifications 的 type **只能是 review_due**。其余类型一律不要发，发了也会被拦下：
    - 不发每日摘要/荐读推送/断签提醒/过时卡提醒/周报——这些都被明确取消了
    - badcase_pending 与 system_failure 由系统按规则生成，你不用管
@@ -90,8 +91,10 @@ AGENT_USER = """【今日质检报告】
 }}
 
 要求：
-1. 有值得读的新卡 → recommendations 给 Top 3（附 why）；没有好卡就不给（不要硬凑）。
-   （recommendations 不再推送，只作为 App 内的发现层数据。）
+1. recommendations 是你唯一的策展出口：从【今日新卡候选】里挑最值得读的 Top 3，
+   每条写清「为什么值得读」。App 的「发现」页就靠它把「今天有一堆卡」变成
+   「这三张先读」——挑不出来，用户看到的就只是一列并列的卡。
+   确实都不值得单独推荐时才给空数组，不要为凑数硬给。
 2. 复习拖欠（due>0 且完成率<60%）→ 发一条 review_due，level=warn。
 3. notifications 数组可以为空。**发通知的门槛是"用户必须做点什么"，不是"有话要说"。**
 """
@@ -262,6 +265,20 @@ def think(api_key, report, signals):
         return None
 
 
+def norm_url(u):
+    """URL 归一化，**只用于比对候选，绝不用于落库**。
+
+    模型抄候选里的 source_url 时，少写协议、多个 www、多个尾斜杠都很常见。
+    沿用逐字符比对会把这些整批判为「不在候选里」，而过滤不报错——
+    表现是荐读永远是空的，且没人知道是模型写错还是真没内容。
+    落库那一侧必须用候选里的原值：卡片是按原值建索引的。
+    """
+    s = (u or "").strip().lower()
+    s = re.sub(r"^https?://", "", s)
+    s = re.sub(r"^www\.", "", s)
+    return s.rstrip("/")
+
+
 def validate_decision(decision, signals):
     """校验 LLM 输出：regen_candidates 必须在待拍板范围内且 ≤3；notifications 合法且 ≤4；
     recommendations 必须在今日新卡候选里且 ≤3。"""
@@ -286,20 +303,35 @@ def validate_decision(decision, signals):
             n["level"] = "info"
         cleaned.append({"type": n["type"], "title": str(n["title"])[:20],
                         "body": str(n["body"])[:120], "level": n["level"]})
-    # 荐食校验：只能从今日新卡里挑
-    pick_urls = {p.get("source_url") for p in today_picks()}
+    # 荐读校验：只能从今日新卡里挑。
+    # 匹配走归一化后的 URL，但落库用**候选里的原值**——模型抄 URL 时少个
+    # 协议、多个尾斜杠很常见，逐字符比对会把这些整批判为「不在候选里」，
+    # 而过滤是静默的：表现就是「为你挑的」永远是空的，且没人知道为什么。
+    pick_by_key = {}
+    for p in today_picks():
+        if p.get("source_url"):
+            pick_by_key.setdefault(norm_url(p["source_url"]), p)
     recs = decision.get("recommendations") or []
     if not isinstance(recs, list):
         recs = []
     cleaned_recs = []
     for r in recs:
-        if not isinstance(r, dict) or not r.get("source_url") or not r.get("why"):
+        if not isinstance(r, dict):
             continue
-        if r["source_url"] not in pick_urls:
+        p = pick_by_key.get(norm_url(r.get("source_url")))
+        if not p:
+            print("荐读丢弃 %r：不在今日新卡候选里（候选 %d 张）"
+                  % (r.get("source_url"), len(pick_by_key)))
             continue
-        cleaned_recs.append({"source_url": r["source_url"],
-                             "title": str(r.get("title") or "")[:30],
-                             "why": str(r.get("why") or "")[:60]})
+        # why 是这条推荐的正文——只报标题等于没推荐。模型漏写就用卡片摘要
+        # 兜底，比整条丢掉好。
+        why = str(r.get("why") or p.get("summary") or "")[:60]
+        if not why:
+            print("荐读丢弃 %r：既没写理由，卡片也没有摘要可用" % r.get("source_url"))
+            continue
+        cleaned_recs.append({"source_url": p["source_url"],
+                             "title": str(r.get("title") or p.get("title") or "")[:40],
+                             "why": why})
     return {"regen_candidates": regen, "notifications": cleaned[:4],
             "recommendations": cleaned_recs[:3],
             "summary": str(decision.get("summary") or "")[:40]}
@@ -377,11 +409,13 @@ def execute(api_key, decision, signals, backup_dir, dry_run=False):
     if remaining:
         names = "、".join((b.get("title") or "")[:10] for b in remaining[:3])
         notifications.pending_review(len(remaining), names)
-    # 4. 荐读 Top 3：**不再推送**，存进 user_state 供 App 内的发现层读取。
-    #    直接删掉会让"为你挑出值得读的 Top 3"这个能力悄悄消失——数据先留着。
+    # 4. 荐读 Top 3：不推送，写进 user_state 供 App 的「发现」页读取。
+    #    **无条件覆盖，含空数组**：只写非空的话，今天没挑出来时会继续展示
+    #    昨天那份，而用户看不出它是过期的——宁可显示「今天没有」。
     recs = decision.get("recommendations") or []
-    if recs:
-        db.set_user_state("daily_picks", json.dumps(recs, ensure_ascii=False))
+    db.set_user_state("daily_picks", json.dumps(recs, ensure_ascii=False))
+    if not recs:
+        print("今日无荐读（候选 %d 张，模型未给出或全部不合格）" % len(today_picks()))
     # 5. 过时卡 / 薄弱卡：不再单独发通知（属于内容质量，交给质检流程与复习提醒）
     return results
 
@@ -429,6 +463,7 @@ def main():
 
     print("== 管家决策 ==")
     print("summary:", decision.get("summary"))
+    print("荐读 %d 条" % len(decision.get("recommendations") or []))
     for n in decision.get("notifications") or []:
         print("通知[%s]: %s - %s" % (n.get("level"), n.get("title"), n.get("body")))
     for r in results:

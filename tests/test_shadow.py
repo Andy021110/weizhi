@@ -77,3 +77,32 @@ def test_bridge_marks_shadow_flag():
     normal = bridge_v1.to_v1_card(draft, items, {"url": "https://y/1"}, shadow=False)
     assert db.is_shadow_card(shadow) is True
     assert db.is_shadow_card(normal) is False
+
+
+# ---------- 隔离标记必须真的落进库 ----------
+
+def test_meta_markers_survive_roundtrip(tmp_db):
+    """回归：`_meta` 曾被列在 save_card 的 fixed 集合里，落库时整块丢弃。
+
+    `is_shadow_card` 查 `_meta.shadow` 与 `_bridge.shadow` 两处是纵深防御，
+    但前者从来没写进库——等于一条防线从未通电。这里用一张**只有 _meta
+    标记**的卡来测，否则 _bridge 会把问题遮住。
+    """
+    db.save_card({
+        "title": "只有 _meta 标记的卡", "source_url": "https://x/meta-only",
+        "template": "t2_reading",
+        "_meta": {"template": "t2_reading", "shadow": True, "origin": "v2-bridge"},
+    }, date="2026-09-11")
+    card = db.get_card("https://x/meta-only")
+    assert card["_meta"].get("shadow") is True
+    assert card["_meta"].get("origin") == "v2-bridge"
+    assert db.is_shadow_card(card) is True
+
+
+def test_row_to_card_keeps_display_meta_without_extra(tmp_db):
+    """补列值的那一步不能把展示字段也搞丢（没有 extra 的老卡最容易踩）。"""
+    db.save_card({"title": "T", "source_url": "https://x/plain", "category": "AI",
+                  "template": "t2_reading"}, date="2026-09-11")
+    card = db.get_card("https://x/plain")
+    assert card["_meta"]["category"] == "AI"
+    assert card["_meta"]["template"] == "t2_reading"

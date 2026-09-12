@@ -406,8 +406,12 @@ def save_card(card, date=None):
     fixed = {"source_url", "title", "summary", "body", "core_points", "think_question",
              "open_question", "quiz", "difficulty", "source", "category", "template",
              "generated_at", "date", "plan_id", "plan_index", "plan_total",
-             "group_index", "batch_index", "_meta", "_date",
+             "group_index", "batch_index", "_date",
              "next_review_at", "memory_state"}
+    # 注意：`_meta` **不在** fixed 里。它带的不只是展示字段，还有 shadow /
+    # origin 这类隔离与溯源标记——放进来就等于整块丢掉。曾经就是这样：
+    # `is_shadow_card` 查 `_meta.shadow` 和 `_bridge.shadow` 两处做纵深防御，
+    # 而前者从来没写入过库，等于一条防线从未通电。
     extra = {k: v for k, v in card.items() if k not in fixed and v not in (None, "")}
     extra_json = _dump(extra) if extra else None
 
@@ -440,12 +444,16 @@ def _row_to_card(row):
     extra = _load(d.pop("extra", None))
     if isinstance(extra, dict):
         d.update(extra)
-    # 还原前端依赖的 _meta 与 _date 字段，保证阅读器展示不变
-    d["_meta"] = {
+    # 还原前端依赖的 _meta 与 _date 字段，保证阅读器展示不变。
+    # 这里**在 extra 带回来的 _meta 上补齐**，而不是整体重建——重建会把
+    # shadow / origin 这类标记抹掉（见 save_card 里对 _meta 的说明）。
+    meta = dict(d.get("_meta") or {})
+    meta.update({
         "category": d.get("category"),
         "template": d.get("template"),
         "generated_at": d.get("generated_at"),
-    }
+    })
+    d["_meta"] = meta
     d["_date"] = d.get("date")
     return d
 
