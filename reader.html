@@ -2765,37 +2765,72 @@
       }
       bindQcDetail(box);
     }
-    // M3 自动修复记录（低分 badcase 已被巡检自动重生成，可回滚）
-    var acts = r.auto_actions || [];
-    var okActs = acts.filter(function (a) { return a.success; });
-    if (okActs.length) {
-      var actHtml = '<div class="qc-badcase-title">已自动修复 ' + okActs.length + ' 张（不满意可回滚）：</div>' +
-        okActs.map(function (a, i) {
-          return '<div class="qc-badcase">' +
-            '<div class="qc-badcase-head"><b>' + (i + 1) + '. ' + escapeHtml(a.title || '(无标题)') + '</b>' +
-            '<span class="qc-score" style="color:var(--primary)">自动修复</span></div>' +
-            '<div class="qc-badcase-why">' + escapeHtml(a.reason || '') + '</div>' +
+    // 待审修订候选（CP24）：**这些候选还没有生效**，卡片保持原样。
+    // 原来自动修复会直接写回卡片，而写回会「存新卡 + 删旧卡」，
+    // 连带删掉学习记录；现在只提出候选，采纳与否在这里定。
+    loadRevisions(box);
+  }
+
+  function loadRevisions(box) {
+    fetchJSON('/api/revisions').then(function (data) {
+      var revs = data.revisions || [];
+      if (!revs.length) return;
+      var html = '<div class="qc-badcase-title">待审修订 ' + revs.length + ' 张（采纳后才会生效）：</div>' +
+        revs.map(function (rv) {
+          var changes = (rv.changes || []).map(function (ch) {
+            return ch.kind === 'count'
+              ? ch.label + ' ' + ch.before + ' → ' + ch.after + ' 条'
+              : ch.label + ' ' + ch.before + ' → ' + ch.after + ' 字';
+          }).join(' · ');
+          return '<div class="qc-badcase" data-rev="' + rv.id + '">' +
+            '<div class="qc-badcase-head"><b>' + escapeHtml(rv.title || '(无标题)') + '</b>' +
+            (rv.studied ? '<span class="qc-score" style="color:var(--accent)">你已学过</span>' : '') + '</div>' +
+            '<div class="qc-badcase-why">' + escapeHtml(rv.reason || '') +
+            (changes ? '　变更：' + escapeHtml(changes) : '') + '</div>' +
             '<div class="qc-badcase-actions">' +
-              '<button type="button" class="qc-regen ghost" data-detail="' + escapeHtml(a.source_url) + '">查看详情</button>' +
-              '<button type="button" class="qc-regen" data-rollback="' + escapeHtml(a.source_url) + '" style="background:transparent;color:var(--red);border:1px solid var(--red)">↩ 回滚</button>' +
+              '<button type="button" class="qc-regen ghost" data-rev-detail="' + escapeHtml(rv.source_url) + '">看现在的卡</button>' +
+              '<button type="button" class="qc-regen" data-rev-apply="' + rv.id + '">采纳</button>' +
+              '<button type="button" class="qc-regen ghost" data-rev-reject="' + rv.id + '">丢弃</button>' +
             '</div>' +
             '<div class="qc-detail" style="display:none"></div>' +
           '</div>';
         }).join('');
-      box.innerHTML += actHtml;
-      var rollbackBtns = box.querySelectorAll('[data-rollback]');
-      for (var j = 0; j < rollbackBtns.length; j++) {
-        rollbackBtns[j].addEventListener('click', function () {
-          rollbackBadcase(this.getAttribute('data-rollback'), this);
+      box.innerHTML += html;
+
+      var applyBtns = box.querySelectorAll('[data-rev-apply]');
+      for (var i = 0; i < applyBtns.length; i++) {
+        applyBtns[i].addEventListener('click', function () {
+          decideRevision(this.getAttribute('data-rev-apply'), 'apply', this);
+        });
+      }
+      var rejectBtns = box.querySelectorAll('[data-rev-reject]');
+      for (var k = 0; k < rejectBtns.length; k++) {
+        rejectBtns[k].addEventListener('click', function () {
+          decideRevision(this.getAttribute('data-rev-reject'), 'reject', this);
         });
       }
       bindQcDetail(box);
-    }
-    var failActs = acts.filter(function (a) { return !a.success; });
-    if (failActs.length) {
-      box.innerHTML += '<div class="qc-badcase-why" style="margin-top:8px;color:var(--text-3)">自动修复失败 ' + failActs.length + ' 张（' +
-        failActs.map(function (a) { return escapeHtml((a.title || a.source_url || '').slice(0, 16)); }).join('、') + '），请手动重生成</div>';
-    }
+    }).catch(function () {});
+  }
+
+  function decideRevision(id, action, btn) {
+    var label = action === 'apply' ? '采纳' : '丢弃';
+    if (action === 'apply' && !confirm('采纳这份修订？会替换卡片内容，但你的学习进度与复习记录会保留。')) return;
+    btn.disabled = true;
+    btn.textContent = label + '中...';
+    postJSONData('/api/revision/' + action, { id: parseInt(id, 10) }).then(function (res) {
+      if (!res || !res.success) {
+        alert(label + '失败：' + ((res && res.error) || '未知错误'));
+        btn.disabled = false;
+        btn.textContent = label;
+        return;
+      }
+      openQcReport();
+    }).catch(function () {
+      alert(label + '失败：网络错误');
+      btn.disabled = false;
+      btn.textContent = label;
+    });
   }
 
   function bindQcDetail(container) {

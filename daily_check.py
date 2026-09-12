@@ -296,47 +296,41 @@ def _update_backup_new(backup_dir, rel, new_src):
         pass
 
 
-def auto_regen(api_key, badcases, backup_dir, max_actions=3):
-    """M3 安全子集：对可自动修复的 badcase 自动重生成。
-    - AI 打分 ≤2.0（最差的一批）→ 自动
-    - 规则命中（排除「重复卡」，重生成无意义）→ 自动
-    - 每轮最多 max_actions 张；同一卡最多自动修复 2 次（防反复烧钱）
-    重生成前备份旧卡（回滚用）。返回动作列表，写入报告 auto_actions。"""
-    from reader import regen_card  # 延迟导入避免循环
+def propose_revisions(api_key, badcases, max_actions=3):
+    """对判定的坏卡**提出修订候选**，不直接改卡。
+
+    范围决策：不允许「自愈 Agent」静默修改已发布的卡片，重新发布前要过人工。
+    原来的实现是备份 + 重生成写回，而写回会「存新卡 + 删旧卡」，
+    连带删掉用户的完成记录——已学过的卡尤其不能这样变。
+
+    返回候选记录，写入报告的 revisions 字段。
+    """
+    import revisions
     candidates = []
     for b in badcases:
         if b["source"] == "ai" and (b.get("score") is not None) and b["score"] <= 2.0:
             candidates.append(b)
         elif b["source"] == "rule" and "重复卡" not in (b.get("issues") or []):
             candidates.append(b)
-    actions = []
+    out = []
     for b in candidates[:max_actions]:
-        src = b["source_url"]
-        old = db.get_card(src)
-        if not old:
-            actions.append({"source_url": src, "action": "regen", "success": False, "reason": "卡不存在"})
+        src = b.get("source_url")
+        if not src:
             continue
-        if _backup_count(src, backup_dir) >= 2:
-            actions.append({"source_url": src, "action": "regen", "success": False, "reason": "已自动修复2次，转人工"})
-            continue
-        backup = _backup_card(old, backup_dir)
-        result = regen_card(api_key, src)
-        ok = bool(result.get("success"))
-        new_src = (result.get("card") or {}).get("source_url") if ok else None
-        if ok:
-            _update_backup_new(backup_dir, backup, new_src)
-        actions.append({
+        r = revisions.propose(api_key, src, reason=b.get("reason") or "巡检判定为坏卡",
+                              origin="auto")
+        out.append({
             "source_url": src,
-            "title": old.get("title") or "",
+            "title": b.get("title") or "",
             "score": b.get("score"),
-            "reason": b.get("reason", ""),
-            "action": "regen",
-            "success": ok,
-            "error": None if ok else result.get("error"),
-            "backup": backup if ok else None,
-            "new_source_url": new_src,
+            "success": "revision_id" in r,
+            "revision_id": r.get("revision_id"),
+            "studied": r.get("studied"),
+            "changes": r.get("changes") or [],
+            "error": r.get("error"),
         })
-    return actions
+    return out
+
 
 
 def build_summary(report):
@@ -355,7 +349,7 @@ def build_summary(report):
         c = db.get_card(b.get("source_url") or "")
         tpl = (c or {}).get("template") or "未知"
         tpl_counter[tpl] = tpl_counter.get(tpl, 0) + 1
-    acts = report.get("auto_actions") or []
+    acts = report.get("revisions") or []
     ok = [a for a in acts if a.get("success")]
     trend = []
     for i in range(6, -1, -1):
@@ -441,8 +435,10 @@ def main():
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return
 
-    # M3 安全子集：自动修复（低分/可修 badcase 自动重生成，带备份可回滚）
-    report["auto_actions"] = auto_regen(api_key, badcases, os.path.join(REPORTS_DIR, "backups"))
+    # M3 安全子集（CP24 起改语义）：**只提出修订候选，不改卡**。
+    # 原来这里会直接重生成写回并「存新卡 + 删旧卡」，连带删掉用户的完成记录；
+    # 现在候选挂在审核界面，采纳与否由人决定。
+    report["revisions"] = propose_revisions(api_key, badcases)
 
     # 收集总结：问题类型分布 + 模板分布 + 修复统计 + 近 7 天趋势
     report["summary"] = build_summary(report)
@@ -452,11 +448,12 @@ def main():
     with open(path, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
     cleanup()
-    ok_actions = [a for a in (report.get("auto_actions") or []) if a.get("success")]
-    print("已生成质检报告：%s（检查 %d 张，badcase %d 个，通过率 %s，自动修复 %d/%d 成功）" % (
+    revs = report.get("revisions") or []
+    ok_revs = [a for a in revs if a.get("success")]
+    print("已生成质检报告：%s（检查 %d 张，badcase %d 个，通过率 %s，提出修订候选 %d/%d）" % (
         path, checked, len(badcases),
         ("%.1f%%" % (report["pass_rate"] * 100)) if report["pass_rate"] is not None else "-",
-        len(ok_actions), len(report.get("auto_actions") or [])))
+        len(ok_revs), len(revs)))
 
 
 if __name__ == "__main__":

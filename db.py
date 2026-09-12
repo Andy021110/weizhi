@@ -168,6 +168,20 @@ CREATE TABLE IF NOT EXISTS v2_review_log (
   created_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS card_revisions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_url TEXT,          -- 要修订的那张卡
+  status TEXT,              -- pending / applied / rejected
+  reason TEXT,              -- 为什么要修订
+  origin TEXT,              -- auto（巡检自动提出）/ manual（用户点重新生成）
+  studied INTEGER DEFAULT 0,-- 提出时用户是否已经学过这张卡
+  payload TEXT,             -- 修订后的内容（JSON），**采纳前不生效**
+  prev_payload TEXT,        -- 采纳前的原内容，供回滚
+  note TEXT,                -- 采纳/丢弃时留的说明
+  created_at TEXT,
+  decided_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS v2_goals (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   goal_key TEXT,            -- 同一愿望的多个版本共享一个 key
@@ -2160,5 +2174,193 @@ def load_ledger_from_reading(limit=20, min_count=2):
             })
         # 已生成卡的概念（无论 learning/mastered）不再出现在待学清单
         return [it for it in items if not it["has_card"]]
+    finally:
+        conn.close()
+
+
+# ============================================================
+# 卡片修订候选（CP24，候选质量状态机）
+#
+# 范围决策：允许自动生成修订候选，但**重新发布前应经过门禁**，
+# 不允许「自愈 Agent」静默修改已发布的卡片。
+#
+# 所以巡检发现问题时只**提出候选**（写在这里，pending），
+# 采纳与否由人决定；采纳时才写回 cards，并且**原地更新**——
+# 不删旧卡，因此学习进度与复习状态都保留。
+# ============================================================
+
+def save_card_revision(source_url, payload, reason="", origin="auto",
+                       studied=False, prev_payload=None):
+    """提出一份修订候选，返回 revision id。同一张卡已有 pending 候选则替换它。"""
+    now = datetime.now().isoformat(timespec="seconds")
+    conn = _conn()
+    try:
+        row = conn.execute(
+            "SELECT id FROM card_revisions WHERE source_url = ? AND status = 'pending'",
+            (source_url,),
+        ).fetchone()
+        if row:
+            conn.execute(
+                "UPDATE card_revisions SET payload=?, reason=?, origin=?, studied=?, "
+                "prev_payload=COALESCE(?, prev_payload), created_at=? WHERE id=?",
+                (_dump(payload), reason, origin, 1 if studied else 0,
+                 _dump(prev_payload), now, row["id"]),
+            )
+            conn.commit()
+            return row["id"]
+        cur = conn.execute(
+            "INSERT INTO card_revisions (source_url, status, reason, origin, studied, "
+            "payload, prev_payload, created_at) VALUES (?,?,?,?,?,?,?,?)",
+            (source_url, "pending", reason, origin, 1 if studied else 0,
+             _dump(payload), _dump(prev_payload), now),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def _revision_row(row):
+    d = dict(row)
+    d["payload"] = _load(d.get("payload"))
+    d["prev_payload"] = _load(d.get("prev_payload"))
+    d["studied"] = bool(d.get("studied"))
+    return d
+
+
+def get_card_revision(rev_id):
+    conn = _conn()
+    try:
+        row = conn.execute("SELECT * FROM card_revisions WHERE id = ?", (rev_id,)).fetchone()
+    finally:
+        conn.close()
+    return _revision_row(row) if row else None
+
+
+def list_card_revisions(status=None, limit=50):
+    conn = _conn()
+    try:
+        if status:
+            rows = conn.execute(
+                "SELECT * FROM card_revisions WHERE status = ? ORDER BY id DESC LIMIT ?",
+                (status, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM card_revisions ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+    finally:
+        conn.close()
+    return [_revision_row(r) for r in rows]
+
+
+def count_pending_revisions():
+    conn = _conn()
+    try:
+        return conn.execute(
+            "SELECT COUNT(*) FROM card_revisions WHERE status = 'pending'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+
+def decide_card_revision(rev_id, status, note=None, prev_payload=None):
+    """把候选标记为 applied / rejected，返回是否命中。"""
+    if status not in ("applied", "rejected"):
+        return False
+    conn = _conn()
+    try:
+        cur = conn.execute(
+            "UPDATE card_revisions SET status=?, note=?, decided_at=?, "
+            "prev_payload=COALESCE(?, prev_payload) WHERE id=? AND status='pending'",
+            (status, note, datetime.now().isoformat(timespec="seconds"),
+             _dump(prev_payload), rev_id),
+        )
+        conn.commit()
+        return cur.rowcount == 1
+    finally:
+        conn.close()
+
+
+def was_studied(source_url):
+    """用户是否已经学过这张卡（有完成记录）。
+
+    已学过的卡尤其不能静默变化——人已经把时间投进去了。
+    """
+    if not source_url:
+        return False
+    conn = _conn()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM progress WHERE card_source_url = ?", (source_url,)
+        ).fetchone()
+        return bool(row and row[0])
+    finally:
+        conn.close()
+
+
+# 修订采纳时**不覆盖**的列：这些是学习过程的产物，不是卡的内容
+_REVISION_PRESERVE = (
+    "id", "source_url", "date", "plan_id", "plan_index", "plan_total",
+    "group_index", "batch_index", "next_review_at", "memory_state",
+    "review_count", "ease", "interval_days", "favorite",
+)
+
+# extra 里**不覆盖**的键：v2 溯源、配图、题目集都不是"内容"，是附属产物
+_REVISION_PRESERVE_EXTRA = ("_bridge", "figures", "assessment")
+
+
+def apply_card_revision(source_url, payload, date=None):
+    """把修订内容写回卡片，**保留学习进度与复习状态**。返回是否成功。
+
+    这是对原实现的修正：旧路径是「存新卡 + 删旧卡」，而 `delete_card`
+    会连带删掉 progress——等于"修卡"顺手抹掉用户的学习历史。
+    这里改成原地更新：内容字段换掉，学习产物（进度、复习间隔、计划归属）保留。
+    """
+    if not source_url or not isinstance(payload, dict):
+        return False
+    old = get_card(source_url)
+    if not old:
+        return False
+
+    # 只有这几项是 cards 表的列；其余（think_answer / review_quiz / timeliness
+    # / credibility / published / words …）都存在 extra JSON 里。
+    # 分错会被 SQLite 直接拒掉（no such column），所以两处清单必须与 save_card 一致。
+    text_cols = ("title", "summary", "body", "think_question", "difficulty",
+                 "source", "category", "template")
+    json_cols = ("core_points", "open_question", "quiz")
+
+    fixed = set(_REVISION_PRESERVE) | {"_meta", "_date"}
+    fields, extra = {}, {}
+    for k, v in payload.items():
+        if k in fixed or v is None:
+            continue
+        if k in text_cols:
+            fields[k] = v
+        elif k in json_cols:
+            fields[k] = _dump(v)
+        else:
+            extra[k] = v
+    if not fields and not extra:
+        return False
+
+    # 附件（_bridge / figures / assessment）从旧 extra 继承，不让内容更新把它们抹掉
+    merged_extra = {k: old.get(k) for k in _REVISION_PRESERVE_EXTRA if old.get(k) is not None}
+    merged_extra.update(extra)
+
+    # 刻意**不更新 generated_at**：它是卡片的出生时间。若让修订把它刷新，
+    # 被改过的卡会重新落进「近 48 小时」的质检窗口，变成自己喂自己。
+    sets = ["%s = ?" % k for k in fields] + ["extra = ?"]
+    args = list(fields.values()) + [_dump(merged_extra) if merged_extra else None]
+    if date:
+        sets.append("date = ?")
+        args.append(date)
+    args.append(source_url)
+
+    conn = _conn()
+    try:
+        cur = conn.execute("UPDATE cards SET %s WHERE source_url = ?" % ", ".join(sets), args)
+        conn.commit()
+        return cur.rowcount == 1
     finally:
         conn.close()

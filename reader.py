@@ -580,26 +580,15 @@ def _generate_plan_async(api_key, plan_id, outline, template, total):
         traceback.print_exc()
 
 
-def regen_card(api_key, source_url):
-    """badcase 一键重生成：按原 template/_gen_input 重新生成（走质量门禁），成功后删旧卡。
-    保留原 plan_id/plan_index/group_index/batch_index/plan_total，只换 source_url 去重（不脱离原计划）。
-    幂等：重生成期间在 extra 标记 _regen_at，重复请求直接拒绝。"""
-    if not api_key:
-        return {"error": "未配置 API key"}
-    if not source_url:
-        return {"error": "缺少 source_url"}
-    old = db.get_card(source_url)
-    if not old:
-        return {"error": "卡片不存在"}
-    if old.get("_regen_at"):
-        return {"error": "该卡正在重新生成中，请稍候"}
+def _generate_card(api_key, old):
+    """按原卡的 template / _gen_input 生成一份**新内容**，不写库。
+
+    失败时返回 {"_error": ...}，成功返回卡片 dict。抽出来是为了让
+    「重生成」与「提出修订候选」共用同一段生成逻辑——两份实现必然漂移。
+    """
     template = old.get("template") or (old.get("_meta") or {}).get("template") or "t2_reading"
     gen_input = old.get("_gen_input") or old.get("title") or ""
-    if not gen_input:
-        return {"error": "该卡缺少生成输入，无法重生成"}
-
-    # 标记再生中（幂等防并发）
-    db.update_card_extra(source_url, "_regen_at", datetime.now().isoformat())
+    source_url = old.get("source_url") or ""
 
     from prompts import TEMPLATES
     tpl = TEMPLATES.get(template, TEMPLATES["t2_reading"])
@@ -639,37 +628,46 @@ def regen_card(api_key, source_url):
             user_prompt += "\n注意：上次生成不符合要求（%s），请修正后重新输出完整 JSON。" % "；".join(issues)
 
     if not card or card.get("skip"):
-        db.update_card_extra(source_url, "_regen_at", None)  # 取消标记，允许重试
-        return {"error": card.get("reason", "重生成失败") if card else "重生成失败"}
+        return {"_error": (card.get("reason") if card else None) or "重生成失败"}
 
-    # 保留原计划归属字段，只换 source_url 去重
-    for k in ("plan_id", "plan_index", "plan_total", "group_index", "batch_index"):
-        if old.get(k) is not None:
-            card[k] = old.get(k)
-    card.setdefault("source", old.get("source") or "学习计划")
-    card["_meta"] = {
-        "generated_at": datetime.now().isoformat(),
-        "template": template,
-        "category": old.get("category") or {
-            "t1_vocab": "词汇", "t2_reading": "精读", "t3_math": "数学",
-            "t4_trivia": "通识", "t5_skill": "技能", "t6_code": "代码",
-        }.get(template, "计划"),
-    }
-    if template == "t1_vocab":
-        fix_vocab_terms(card)
-    card["_gen_input"] = gen_input
-    if not card.get("source_url"):
-        ts = int(time.time())
-        if old.get("plan_id"):
-            card["source_url"] = f"plan:{old['plan_id']}:{old.get('plan_index', 0)}:{ts}"
-        else:
-            card["source_url"] = f"custom:{ts}:{(old.get('title') or gen_input)[:40]}"
+    return card
 
-    if not db.save_card(card):
+
+def regen_card(api_key, source_url, apply=True):
+    """重生成一张卡。
+
+    `apply=False` 时**只生成内容、不写库**——修订候选（revisions.py）需要它：
+    候选在人工采纳前不能改动已发布的卡。
+
+    写回时用 `db.apply_card_revision` **原地更新**，不再「存新卡 + 删旧卡」：
+    后者会连带删掉 progress，等于"修卡"顺手抹掉用户的学习历史。
+    """
+    if not api_key:
+        return {"error": "未配置 API key"}
+    if not source_url:
+        return {"error": "缺少 source_url"}
+    old = db.get_card(source_url)
+    if not old:
+        return {"error": "卡片不存在"}
+    if old.get("_regen_at"):
+        return {"error": "该卡正在重新生成中，请稍候"}
+    gen_input = old.get("_gen_input") or old.get("title") or ""
+    if not gen_input:
+        return {"error": "该卡缺少生成输入，无法重生成"}
+
+    card = _generate_card(api_key, old)
+    if isinstance(card, dict) and card.get("_error"):
+        return {"error": card["_error"]}
+
+    if not apply:
+        return {"success": True, "card": card, "applied": False}
+
+    db.update_card_extra(source_url, "_regen_at", datetime.now().isoformat())
+    if not db.apply_card_revision(source_url, card):
         db.update_card_extra(source_url, "_regen_at", None)
-        return {"error": "新卡入库失败（可能重复），请重试"}
-    db.delete_card(source_url)  # 删旧卡 + 旧完成记录
-    return {"success": True, "card": card}
+        return {"error": "写回失败，请重试"}
+    db.update_card_extra(source_url, "_regen_at", None)
+    return {"success": True, "card": card, "applied": True}
 
 
 def find_backup(source_url):
@@ -703,13 +701,18 @@ def rollback_card(source_url):
     card = data.get("card") or {}
     if not card.get("source_url"):
         return {"error": "备份内容异常"}
-    # 删新卡（自动重生成产生的那张）
+    # 删新卡：只对「旧实现」产生的备份有意义（那时重生成会换 source_url）。
+    # 现在的重生成是原地更新，url 不变，这一支不会命中。
     new_src = data.get("new_source_url")
     if new_src and new_src != card["source_url"]:
         db.delete_card(new_src)
-    # 恢复旧卡（先删可能残留的旧卡再存，保证幂等）
-    db.delete_card(card["source_url"])
-    db.save_card(card, date=data.get("card_date") or card.get("date"))
+    # 恢复旧内容：**原地写回**，不再 delete + save。
+    # 后者会连带删掉 progress——回滚不该把用户在学习期间攒下的记录抹掉。
+    date = data.get("card_date") or card.get("date")
+    if db.get_card(card["source_url"]):
+        db.apply_card_revision(card["source_url"], card, date=date)
+    else:
+        db.save_card(card, date=date)
     for d in (data.get("progress_dates") or []):
         db.restore_progress(d, card["source_url"])
     return {"success": True, "card": card}
@@ -991,6 +994,16 @@ class ReaderHandler(BaseHTTPRequestHandler):
             self._send_json({"card": picked})
             return
 
+        if path == "/api/revisions":
+            # 待审修订候选。**这些候选还没有生效**，卡片保持原样，
+            # 采纳与否由这里决定（范围决策：不允许自愈静默改已发布的卡）。
+            import revisions
+            self._send_json({
+                "revisions": revisions.pending(limit=50),
+                "pending": revisions.count_pending(),
+            })
+            return
+
         if path == "/api/favorites":
             self._send_json({"cards": db.load_favorites()})
             return
@@ -1254,6 +1267,24 @@ class ReaderHandler(BaseHTTPRequestHandler):
                 self._send_json({"success": False, "error": err})
                 return
             self._send_json({"success": True, "feedback": feedback})
+            return
+
+        if path == "/api/revision/apply":
+            import revisions
+            result, err = revisions.apply(_int_arg(req.get("id")), note=req.get("note"))
+            if err:
+                self._send_json({"success": False, "error": err})
+                return
+            self._send_json({"success": True, "result": result})
+            return
+
+        if path == "/api/revision/reject":
+            import revisions
+            result, err = revisions.reject(_int_arg(req.get("id")), note=req.get("note"))
+            if err:
+                self._send_json({"success": False, "error": err})
+                return
+            self._send_json({"success": True, "result": result})
             return
 
         if path == "/api/review/finish":

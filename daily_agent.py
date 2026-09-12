@@ -44,7 +44,9 @@ AGENT_SYSTEM = """你是一位「私人学习管家 Agent」，负责替用户�
 
 铁律：
 1. 只输出合法的 JSON，不要输出 JSON 以外的文字。
-2. regen_candidates 只能从输入给出的可自动修复清单里选（source_url 必须原样匹配）；选中的会被系统自动修复，不要再在通知里提到它们。
+2. regen_candidates 只能从输入的【可修订清单】里选（source_url 必须原样匹配）。
+   它们只会被**提出为修订候选**，不会自动改动卡片——采纳与否由用户在审核界面决定。
+   所以不要在通知里提它们（那是审核界面的事）。
 3. recommendations 只能从【今日新卡候选】里挑（source_url 必须原样匹配），最多 3 条；候选不足 3 条就少给，不要硬凑。
 4. notifications 的 type **只能是 review_due**。其余类型一律不要发，发了也会被拦下：
    - 不发每日摘要/荐读推送/断签提醒/过时卡提醒/周报——这些都被明确取消了
@@ -62,7 +64,7 @@ AGENT_USER = """【今日质检报告】
 【今日新卡候选（从这里挑 recommendations 的 Top 3）】
 {picks}
 
-【可自动修复清单（评分 2-3 分，可从这里挑 regen_candidates）】
+【可修订清单（评分 2-3 分，可从这里挑 regen_candidates，只会生成候选）】
 {regenable}
 
 输出 JSON（字段名必须一致）：
@@ -149,12 +151,15 @@ def rule_signals(report, y_report):
     for b in badcases:
         if b.get("source") == "ai" and b.get("score") is not None and 2 < b["score"] <= 3:
             pending.append(b)
-    for a in report.get("auto_actions") or []:
-        if not a.get("success") and a.get("source_url"):
-            pending.append({
-                "source_url": a["source_url"], "title": a.get("title") or "",
-                "score": a.get("score"), "reason": "自动修复失败：" + (a.get("error") or ""),
-            })
+    # 待审修订候选也算"需要你审核"——它们不会自己生效，堆着就是待办
+    import revisions
+    for rv in revisions.pending(limit=50):
+        pending.append({
+            "source_url": rv["source_url"], "title": rv.get("title") or "",
+            "score": None,
+            "reason": "有修订候选待审：%s" % (rv.get("reason") or "巡检发现问题"),
+            "studied": rv.get("studied"),
+        })
     # 复习拖欠
     due = metrics.get("due_today") or 0
     compliance = metrics.get("compliance_today")
@@ -239,8 +244,7 @@ def think(api_key, report, signals):
                                       "reason": b.get("reason"), "source": b.get("source")}
                                      for b in (report.get("badcases") or [])],
                         "metrics": report.get("metrics") or {},
-                        "auto_actions": [{"title": a.get("title"), "success": a.get("success")}
-                                         for a in (report.get("auto_actions") or [])],
+                        "revision_candidates": db.count_pending_revisions(),
                     }, ensure_ascii=False),
                     signals=json.dumps(signals, ensure_ascii=False, default=str),
                     picks=json.dumps(today_picks(), ensure_ascii=False, default=str),
@@ -330,9 +334,14 @@ def fallback(report, signals):
 
 
 def execute(api_key, decision, signals, backup_dir, dry_run=False):
-    """执行决策：写通知 + 自动修复（带备份）。返回动作记录。"""
-    from daily_check import _backup_card, _backup_count, _update_backup_new
-    from reader import regen_card
+    """执行决策：写通知 + **提出修订候选**。返回候选记录。
+
+    范围决策：不允许「自愈 Agent」静默修改已发布的卡片。所以这里不再直接
+    重生成写回，只提出候选（`revisions.propose`）；采纳与否在审核界面里定。
+
+    残留的 `backup_dir` 参数保留只为兼容调用方——现在不改卡，自然也不需要备份。
+    """
+    import revisions
     results = []
     # 1. 写通知（去重：同 type 同 title 当天不重复写）
     existing = {n.get("type") + "|" + n.get("title")
@@ -343,27 +352,22 @@ def execute(api_key, decision, signals, backup_dir, dry_run=False):
         if key in existing:
             continue
         notifications.emit(n["type"], n["title"], n["body"], level=n.get("level", "info"))
-    # 2. 自动修复
+    # 2. 提出修订候选（不改动已发布的卡）
     for src in decision.get("regen_candidates") or []:
         old = db.get_card(src)
         if not old:
             results.append({"source_url": src, "success": False, "reason": "卡不存在"})
             continue
-        if _backup_count(src, backup_dir) >= 2:
-            results.append({"source_url": src, "success": False, "reason": "已自动修复2次，转人工"})
-            continue
         if dry_run:
             results.append({"source_url": src, "success": True, "reason": "dry-run"})
             continue
-        backup = _backup_card(old, backup_dir)
-        r = regen_card(api_key, src)
-        ok = bool(r.get("success"))
-        if ok:
-            _update_backup_new(backup_dir, backup, (r.get("card") or {}).get("source_url"))
+        r = revisions.propose(api_key, src, reason="每日巡检判定为坏卡", origin="auto")
         results.append({"source_url": src, "title": old.get("title") or "",
-                        "success": ok, "reason": None if ok else r.get("error"),
-                        "backup": backup if ok else None,
-                        "new_source_url": (r.get("card") or {}).get("source_url") if ok else None})
+                        "success": "revision_id" in r,
+                        "reason": None if "revision_id" in r else r.get("error"),
+                        "revision_id": r.get("revision_id"),
+                        "studied": r.get("studied"),
+                        "changes": r.get("changes") or []})
     # 3. 剩余待拍板（系统按规则生成，避免与自动修复重复/矛盾；修复失败的卡也留给用户）
     #
     # 原来的「自动修复成功」通知已删除：那是"普通成功通知"，属于噪音
