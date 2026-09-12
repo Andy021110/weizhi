@@ -487,3 +487,34 @@ def test_no_notification_type_hardcoded_in_frontend():
     for t in ("daily_summary", "daily_picks", "streak_warn", "stale_warn",
               "weak_review", "action_log", "weekly_report"):
         assert t not in code, "前端还在引用已停发的通知类型: %s" % t
+
+
+# ---------- 预览器：抽函数清单必须跟得上渲染层 ----------
+
+def test_preview_renderer_has_everything_it_needs():
+    """预览器靠「从 reader.html 抽函数」工作，抽漏一个就白屏。
+
+    CP22 把渲染改成内容块驱动之后它漏了 `CARD_BLOCKS`，直接 ReferenceError。
+    这个用例拿一张**混装各种块**的卡跑一遍，确保清单是完整的。
+    """
+    import preview_v1_card as P
+
+    card = {
+        "title": "混装卡", "summary": "一句话", "word": "w", "definition_cn": "释义",
+        "hooks": None, "hook": "你知道吗", "intuition": "直觉", "body": "第一段\n\n第二段",
+        "pseudocode": "if x: y()", "examples": [{"en": "a", "cn": "甲"}],
+        "example": "走一遍", "steps": [{"step": "s", "detail": "d"}],
+        "key_steps": ["一"], "why": "为了性能", "bad_example": "别这样",
+        "good_example": "要这样", "tip": "技巧", "common_mistake": "易错",
+        "pitfalls": "坑", "fun_facts": ["f1"], "share_line": "分享",
+        "try_it": "动手", "etymology": "词源",
+        "core_points": ["点1"],
+        "figures": [{"svg": '<svg viewBox="0 0 640 10"></svg>', "caption": "图注",
+                     "reading": "读图结论"}],
+        "think_question": "迁移任务", "think_answer": "参考答案",
+    }
+    html = P.render_card_html(card)
+    for must in ("一句话核心", "词汇详解", "你知道吗", "正文精读", "核心逻辑（伪代码）",
+                 "步骤", "别这么做", "核心观点", "看图理解", "想一想"):
+        assert must in html, "预览漏渲染了 %s" % must
+    assert "<svg" in html

@@ -31,8 +31,19 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 READER = os.path.join(BASE_DIR, "reader.html")
 OUT_DIR = os.path.join(BASE_DIR, "demo_out")
 
-# 渲染一张卡所需的全部前端函数。顺序无关，但缺一个就白屏。
-NEEDED = ("escapeHtml", "renderBody", "renderFigures", "renderCardContent")
+# 渲染一张卡所需的全部前端函数。**缺一个就白屏**——CP22 把渲染改成内容块
+# 驱动之后，这里漏掉 CARD_BLOCKS 就直接 ReferenceError。
+NEEDED = ("escapeHtml", "renderBody", "renderFigures", "layerLabel",
+          "_section", "_numbered", "renderCardBlock", "blockTitle",
+          "renderCardContent")
+
+# 还要带上这两个变量声明（它们是数据不是函数，抽不出来）
+NEEDED_VARS = (("  var CARD_BLOCKS = [", "  function _section("),
+               ("  var LIST_KINDS = ", "  function renderCardContent("))
+
+
+def _vars(src):
+    return [src[src.index(a):src.index(b)] for a, b in NEEDED_VARS]
 
 NODE_CANDIDATES = (
     "/Users/minghan/.workbuddy/binaries/node/versions/22.22.2/bin/node",
@@ -78,7 +89,7 @@ def _style_block(src):
 def render_card_html(card, reader_src=None):
     """用 reader.html 的真实函数渲染一张卡，返回卡片的 HTML 片段。"""
     src = reader_src or open(READER, encoding="utf-8").read()
-    js = "\n".join([_extract(src, n) for n in NEEDED] + [
+    js = "\n".join(_vars(src) + [_extract(src, n) for n in NEEDED] + [
         "var CARD = %s;" % json.dumps(card, ensure_ascii=False),
         "process.stdout.write(renderCardContent(CARD));",
     ])
