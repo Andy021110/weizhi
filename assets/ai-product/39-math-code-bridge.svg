@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="520" viewBox="0 0 1120 520" role="img" aria-labelledby="title desc">
+<title id="title">公式—代码桥</title><desc id="desc">每个数学符号都落到一个张量操作</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#6f746f"/></marker></defs>
+<rect width="1120" height="520" rx="34" fill="#f5f1e8"/>
+<text x="48" y="78" class="title">公式—代码桥</text>
+<text x="48" y="126" class="subtitle">每个数学符号都落到一个张量操作</text>
+<rect x="100" y="170" width="920" height="82" rx="16" class="box alt0"/><text x="560" y="220" text-anchor="middle" class="node">第 1 层 · 公式符号</text><rect x="138" y="232" width="844" height="82" rx="16" class="box alt1"/><text x="560" y="282" text-anchor="middle" class="node">第 2 层 · 张量形状</text><rect x="176" y="294" width="768" height="82" rx="16" class="box alt0"/><text x="560" y="344" text-anchor="middle" class="node">第 3 层 · 代码算子</text><rect x="214" y="356" width="692" height="82" rx="16" class="box alt1"/><text x="560" y="406" text-anchor="middle" class="node">第 4 层 · 数值测试</text>
+<text x="48" y="478" class="hint">图形承担关系表达；结合正文中的例子与问题阅读。</text>
+<style>.title{font:700 38px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;fill:#24231f}.subtitle{font:24px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;fill:#68665f}.node{font:600 22px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;fill:#2c2a25}.small{font:600 19px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;fill:#2c2a25}.label{font:700 20px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;fill:#6b4939}.center{font:700 22px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;fill:white}.hint{font:20px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;fill:#79756c}.box{fill:#fffaf2;stroke:#c76b43;stroke-width:3}.alt1{fill:#e9f0eb;stroke:#66806d}.panelA{fill:#fff4e9;stroke:#c76b43;stroke-width:3}.panelB{fill:#e9f0eb;stroke:#66806d;stroke-width:3}.line{stroke:#6f746f;stroke-width:4;fill:none}.thin{stroke:#9a8f82;stroke-width:2}.axis{stroke:#8b8175;stroke-width:3;fill:none}</style>
+</svg>

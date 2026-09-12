@@ -771,6 +771,7 @@
 
   // ---------- 访问 token（无感鉴权） ----------
   var TOKEN_KEY = 'weizhi_token';
+  var AUTH_REQUIRED = __WEIZHI_AUTH_REQUIRED__;
 
   function getToken() {
     try {
@@ -786,6 +787,7 @@
   }
 
   function ensureAuth() {
+    if (!AUTH_REQUIRED) return true;
     if (getToken()) return true;
     $('authOverlay').style.display = 'flex';
     return false;

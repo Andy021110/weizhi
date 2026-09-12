@@ -24,6 +24,7 @@ import trafilatura
 from openai import OpenAI
 
 import db
+from weizhi_v2.api import handle_get as handle_v2_get, handle_post as handle_v2_post
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("PORT", 8000))
@@ -857,6 +858,15 @@ class ReaderHandler(BaseHTTPRequestHandler):
             self._forbidden()
             return
 
+        if path.startswith("/api/v2/"):
+            try:
+                result = handle_v2_get(path, qs)
+            except (TypeError, ValueError) as e:
+                result = {"error": str(e)}
+            if result is not None:
+                self._send_json(result)
+                return
+
         if path == "/api/dates":
             self._send_json({"dates": list_dates()})
             return
@@ -966,8 +976,18 @@ class ReaderHandler(BaseHTTPRequestHandler):
             self._forbidden()
             return
 
+        if path.startswith("/api/v2/"):
+            try:
+                result = handle_v2_post(path, req)
+            except (KeyError, TypeError, ValueError) as e:
+                result = {"error": str(e)}
+            if result is not None:
+                self._send_json(result)
+                return
+
         if path == "/api/verify":
-            ok = bool(load_access_token()) and req.get("token", "") == load_access_token()
+            configured_token = load_access_token()
+            ok = not configured_token or req.get("token", "") == configured_token
             self._send_json({"ok": ok})
             return
 
@@ -1134,7 +1154,10 @@ class ReaderHandler(BaseHTTPRequestHandler):
 
     def _serve_static(self, path):
         if path in ("/", "/index.html"):
-            file_path = os.path.join(BASE_DIR, "reader.html")
+            ui_version = str(load_config().get("ui_version", "v1")).lower()
+            file_path = os.path.join(BASE_DIR, "reader_v2.html" if ui_version == "v2" else "reader.html")
+        elif path in ("/v2", "/v2/"):
+            file_path = os.path.join(BASE_DIR, "reader_v2.html")
         else:
             rel = path.lstrip("/")
             file_path = os.path.normpath(os.path.join(BASE_DIR, rel))
@@ -1162,6 +1185,9 @@ class ReaderHandler(BaseHTTPRequestHandler):
 
         with open(file_path, "rb") as f:
             body = f.read()
+        if file_path.endswith(".html"):
+            auth_required = b"true" if load_access_token() else b"false"
+            body = body.replace(b"__WEIZHI_AUTH_REQUIRED__", auth_required)
 
         self.send_response(200)
         self.send_header("Content-Type", content_type)

@@ -98,6 +98,9 @@ def init_db():
     finally:
         conn.close()
     _migrate()
+    # v2 使用独立前缀表，旧表和旧数据保持不变，便于灰度与回滚。
+    from weizhi_v2.storage import init_schema as init_v2_schema
+    init_v2_schema(DB_PATH)
 
 
 def _migrate():

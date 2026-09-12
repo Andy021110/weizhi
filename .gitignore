@@ -5,6 +5,7 @@ config.json
 *.db
 *.db.bak*
 cards/
+data/
 __pycache__/
 *.pyc
 

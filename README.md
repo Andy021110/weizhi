@@ -72,6 +72,21 @@ python daily_check.py --dry-run --limit 3   # 预览质量巡检（不落盘）
 python daily_agent.py --dry-run       # 预览管家决策（不执行）
 ```
 
+### v2 学习包预览
+
+v2 采用独立前缀表，不改动旧卡片和学习记录。启动服务后可直接访问：
+
+```bash
+python scripts/generate_v2_diagrams.py  # 生成 6 张确定性学习图
+python scripts/seed_v2_demo.py  # 可选：写入固定 Harness 三卡演示包，不调用模型
+python reader.py
+# 打开 http://localhost:8000/v2
+```
+
+网页正文由 `trafilatura` 清洗；处理 PDF 需要系统已安装 Poppler 的 `pdftotext` 命令。
+
+确认后可在 `config.json` 设置 `"ui_version": "v2"`，让根路径使用新版首页；改回 `v1` 即可回滚界面。
+
 ## 自动化流水线
 
 | 时间（cron）| 任务 | 作用 |
@@ -84,10 +99,10 @@ python daily_agent.py --dry-run       # 预览管家决策（不执行）
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest tests/ -q     # 39 个单测，约 1s，不调用任何 LLM API
+python -m pytest tests/ -q     # 82 个单测，不调用任何 LLM API
 ```
 
-覆盖：SM-2 间隔算法、SimHash 跨源去重、巡检客观规则、管家 LLM 输出白名单校验（用临时 SQLite 库隔离，不污染真实数据）。
+覆盖：SM-2、SimHash、巡检规则、Agent 白名单，以及 v2 目标、学习包、证据门禁、时间预算、GoalSpec、版本保留、证据导入、网页与 PDF 抓取、地址安全、规划器、API 分发、鉴权和静态页面测试。测试使用临时 SQLite 库，不污染真实数据。
 
 ## 目录结构
 
